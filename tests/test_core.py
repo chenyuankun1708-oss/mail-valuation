@@ -11,8 +11,12 @@ from valuation_app.parser import Snapshot, _metric_nearest, _parse_holdings, par
 
 class CoreTest(unittest.TestCase):
     def test_exact_product_scope(self):
-        self.assertEqual(len(PRODUCTS), 15)
+        self.assertEqual(len(PRODUCTS), 17)
         self.assertEqual(match_product("(SALT58)JGFA天玑13号_证券投资基金估值表"), "第一创业天玑13号单一资产管理计划")
+        self.assertEqual(match_product("证券投资基金估值表_五矿证券FOF50号单一资产管理计划_2026-08-07.xls"),
+                         "五矿证券FOF50号单一资产管理计划")
+        self.assertEqual(match_product("证券投资基金估值表_五矿证券FOF51号单一资产管理计划_2026-08-07.xls"),
+                         "五矿证券FOF51号单一资产管理计划")
         self.assertIsNone(match_product("华银元鼎月利三号估值表"))
 
     def test_parse_existing_sample(self):

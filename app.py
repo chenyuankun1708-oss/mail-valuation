@@ -4,6 +4,7 @@ import os
 import sys
 
 from valuation_app.analytics import analyze
+from valuation_app.benchmark import update_cache as update_benchmark_cache
 from valuation_app.mail import download_valuations
 from valuation_app.organize import organize_products
 from valuation_app.parser import scan_valuations
@@ -20,6 +21,12 @@ def refresh_data(products_dir="products", account_users=None):
         result["download"] = {"downloaded": [], "duplicates": 0,
                               "failures": ["%s: %s" % (type(exc).__name__, exc)], "accounts": []}
     result["organize"] = organize_products(products_dir)
+    try:
+        result["benchmark"] = update_benchmark_cache()
+    except Exception as exc:
+        result["benchmark"] = {"successes": [], "failures": [
+            {"error": "%s: %s" % (type(exc).__name__, exc), "used_cache": True}
+        ]}
     path, report = build_index(products_dir)
     result["build"] = {"path": path, "report": report}
     return result
@@ -27,7 +34,7 @@ def refresh_data(products_dir="products", account_users=None):
 
 def main():
     parser = argparse.ArgumentParser(description="从邮件估值表计算单一投资人的收益与收益率")
-    parser.add_argument("command", choices=("download", "organize", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
+    parser.add_argument("command", choices=("download", "organize", "benchmark", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
     parser.add_argument("--products-dir", default="products")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -40,6 +47,8 @@ def main():
                                              account_users=args.account), ensure_ascii=False, indent=2))
     elif args.command == "organize":
         print(json.dumps(organize_products(args.products_dir), ensure_ascii=False, indent=2))
+    elif args.command == "benchmark":
+        print(json.dumps(update_benchmark_cache(), ensure_ascii=False, indent=2))
     elif args.command == "build":
         path, report = build_index(args.products_dir)
         print("已生成：%s；可计算产品：%d" % (path, report["summary"]["analyzable_products"]))

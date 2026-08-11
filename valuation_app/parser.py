@@ -166,7 +166,7 @@ def parse_valuation(path, product=None):
     searchable = os.path.basename(path) + " " + " ".join(str(v) for row in rows[:8] for v in row[:12] if v)
     product = product or match_product(searchable)
     if not product:
-        raise ValueError("不属于配置的15只产品")
+        raise ValueError("不属于配置的目标产品")
 
     # 少数管理人发送两行式净值报告，而不是会计科目估值表。
     tabular = {}
