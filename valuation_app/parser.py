@@ -197,12 +197,19 @@ def parse_valuation(path, product=None):
 
 def scan_valuations(root):
     snapshots, errors = [], []
+    content_hashes = set()
     for base, _, files in os.walk(root):
         for filename in files:
             if not filename.lower().endswith((".xls", ".xlsx")) or filename.startswith("~$"):
                 continue
             path = os.path.join(base, filename)
             try:
+                import hashlib
+                with open(path, "rb") as handle:
+                    digest = hashlib.sha256(handle.read()).digest()
+                if digest in content_hashes:
+                    continue
+                content_hashes.add(digest)
                 snapshots.append(parse_valuation(path))
             except Exception as exc:
                 # 无关历史附件不作为系统错误。

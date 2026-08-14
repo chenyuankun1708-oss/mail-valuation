@@ -41,6 +41,8 @@ def organize_products(root="products"):
                 with open(source, "rb") as handle:
                     suffix = hashlib.sha256(handle.read()).hexdigest()[:8]
                 target = stem + "_副本_" + suffix + ext
+            # 原始估值表只读且不得移动/删除。复制只用于首次归档；扫描端按
+            # 内容哈希去重，因此根目录审计原件不会造成重复计算。
             shutil.copy2(source, target)
             copied.append({"from": source, "to": target})
         except Exception as exc:

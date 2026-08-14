@@ -52,7 +52,7 @@ class FakeConnection(object):
 
 
 class BenchmarkCacheTest(unittest.TestCase):
-    def test_queries_three_wind_indices_and_normalizes_points(self):
+    def test_queries_whitelisted_wind_indices_and_normalizes_points(self):
         connection = FakeConnection()
         with tempfile.TemporaryDirectory() as folder:
             path = os.path.join(folder, "index_daily.json")
@@ -65,6 +65,10 @@ class BenchmarkCacheTest(unittest.TestCase):
         self.assertEqual([params["code"] for _, params in connection.calls],
                          [details["wind_code"] for details in INDICES.values()])
         self.assertTrue(all(":code" in query for query, _ in connection.calls))
+        calls = {params["code"]: query for query, params in connection.calls}
+        self.assertIn("THIRDPARTYINDEXEOD", calls["NH0100.NHF"])
+        self.assertIn("GLOBALINDEXEOD", calls["IXIC.GI"])
+        self.assertIn("AIndexEODPrices", calls["868008.WI"])
         self.assertNotIn("000852.SH", QUERY)
         self.assertEqual(cache["source"], SOURCE_NAME)
         for code in INDICES:
@@ -102,7 +106,7 @@ class BenchmarkCacheTest(unittest.TestCase):
                                   now=datetime(2026, 8, 11))
             cache = load_cache(path)
         self.assertEqual(result["successes"], [])
-        self.assertEqual(len(result["failures"]), 3)
+        self.assertEqual(len(result["failures"]), len(INDICES))
         self.assertTrue(all(item["used_cache"] for item in result["failures"]))
         self.assertNotIn("password", json.dumps(result, ensure_ascii=False))
         self.assertTrue(all(cache["indices"][code]["points"] for code in INDICES))

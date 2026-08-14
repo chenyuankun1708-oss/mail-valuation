@@ -11,15 +11,23 @@ except ImportError:  # pragma: no cover - exercised through a mocked missing dri
 
 
 INDICES = OrderedDict([
-    ("000852", {"name": "中证1000", "wind_code": "000852.SH"}),
-    ("000905", {"name": "中证500", "wind_code": "000905.SH"}),
-    ("000300", {"name": "沪深300", "wind_code": "000300.SH"}),
+    ("000852", {"name": "中证1000", "wind_code": "000852.SH", "table": "AIndexEODPrices"}),
+    ("000905", {"name": "中证500", "wind_code": "000905.SH", "table": "AIndexEODPrices"}),
+    ("000300", {"name": "沪深300", "wind_code": "000300.SH", "table": "AIndexEODPrices"}),
+    ("932000", {"name": "中证2000", "wind_code": "932000.CSI", "table": "AIndexEODPrices"}),
+    ("000985", {"name": "中证全指", "wind_code": "000985.CSI", "table": "AIndexEODPrices"}),
+    ("000510", {"name": "中证A500", "wind_code": "000510.CSI", "table": "AIndexEODPrices"}),
+    ("000922", {"name": "中证红利", "wind_code": "000922.CSI", "table": "AIndexEODPrices"}),
+    ("399303", {"name": "国证2000", "wind_code": "399303.SZ", "table": "AIndexEODPrices"}),
+    ("NH0100", {"name": "南华商品指数", "wind_code": "NH0100.NHF", "table": "THIRDPARTYINDEXEOD"}),
+    ("868008", {"name": "万得微盘股指数", "wind_code": "868008.WI", "table": "AIndexEODPrices"}),
+    ("IXIC", {"name": "纳斯达克综合指数", "wind_code": "IXIC.GI", "table": "GLOBALINDEXEOD"}),
 ])
 SOURCE_NAME = "Wind Oracle数据库"
 DEFAULT_CACHE = os.path.join("market_data", "index_daily.json")
 QUERY = """
     SELECT trade_dt, s_dq_close
-    FROM AIndexEODPrices
+    FROM {table}
     WHERE s_info_windcode = :code
     ORDER BY trade_dt
 """
@@ -102,7 +110,8 @@ def _normalize_rows(rows, code, name):
 def _query_index(connection, code, details):
     cursor = connection.cursor()
     try:
-        cursor.execute(QUERY, code=details["wind_code"])
+        query = QUERY.format(table=details["table"])
+        cursor.execute(query, code=details["wind_code"])
         return _normalize_rows(cursor.fetchall(), code, details["name"])
     finally:
         cursor.close()

@@ -48,6 +48,25 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("(Number(h.period_profit)||0)/base*100", HTML)
         self.assertIn("收益率贡献：${pct(item.value)}", HTML)
 
+    def test_tagged_holding_strategy_and_proxy_nav_features(self):
+        self.assertIn("function holdingLabel", HTML)
+        self.assertIn("卡玛", HTML)
+        self.assertIn("策略组合分析", HTML)
+        self.assertIn("底层产品净值代理走势", HTML)
+        self.assertIn("choices.slice(0,10)", HTML)
+        self.assertIn("function openInfo", HTML)
+        self.assertIn("资金台账", HTML)
+        self.assertIn("产品标签", HTML)
+        self.assertIn("function globalStrategySummary", HTML)
+        self.assertIn("策略组合分析（全部FOF底仓）", HTML)
+        self.assertIn("function selectAllUnderlying", HTML)
+        self.assertIn("全不选", HTML)
+        self.assertIn("绝对收益率", HTML)
+        self.assertIn("function globalHoldingDetails", HTML)
+        self.assertIn("globalPieTip", HTML)
+        self.assertIn("globalBarTip", HTML)
+        self.assertNotIn("占全部FOF期初资产</th>", HTML)
+
     def test_summary_shows_all_products_current_investment(self):
         self.assertIn("所有产品当前总投资额", HTML)
         self.assertIn("products.reduce((s,p)=>s+(p.total_investment||0),0)", HTML)
@@ -62,6 +81,22 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("创新金融业务总部所有组（所有产品）", HTML)
         self.assertIn("FOF1证投组", HTML)
         self.assertIn("FOF2研究所组", HTML)
+        self.assertIn("group-parent", HTML)
+        self.assertIn("group-child", HTML)
+        self.assertIn("↳ 子组", HTML)
+        self.assertIn("function documentGroupHierarchy()", HTML)
+
+    def test_underlying_asset_analysis_is_rendered(self):
+        self.assertIn("function openUnderlyingAssets()", HTML)
+        self.assertIn("底层分析", HTML)
+        self.assertIn("RAW.underlying_assets", HTML)
+        self.assertIn("function renderUnderlyingDate", HTML)
+        self.assertIn("排序：关联FOF → 敞口比例降序", HTML)
+        self.assertIn("const row=document.querySelector('.top-info')", HTML)
+        self.assertIn("risk.textContent='风控页面'", HTML)
+        self.assertIn("underlying.textContent='底层分析'", HTML)
+        self.assertIn("网页更新时间：", HTML)
+        self.assertIn("'932000','868008','NH0100','IXIC'", HTML)
         self.assertIn("其他组", HTML)
         self.assertIn("中金财富私享1554号FOF单一资产管理计划", HTML)
         self.assertIn("国金资管盛乾同行5号FOF单一资产管理计划", HTML)
@@ -122,6 +157,41 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("new Set(['product:'+i,'index:000852','index:000905','index:000300'])", HTML)
         self.assertNotIn("${benchmarkNote}<canvas id=chart", HTML)
 
+
+    def test_fixed_report_and_top_project_links(self):
+        self.assertIn("function openReport()", HTML)
+        self.assertIn("生成报告", HTML)
+        self.assertIn("导出PDF / 打印报告", HTML)
+        self.assertIn("整体各组收益表现", HTML)
+        self.assertIn("各策略最好和最差的底层产品", HTML)
+        self.assertIn("function promoteTopControls()", HTML)
+        self.assertIn("section.style.display='none'", HTML)
+        self.assertIn("function reportAllStrategyShares()", HTML)
+        self.assertIn("所有策略占比", HTML)
+        self.assertIn("data.items.map((item,index)", HTML)
+
+    def test_label_field_mapping_is_documented_in_page(self):
+        self.assertIn("策略组合分析使用有效一级标签", HTML)
+        self.assertIn("B列“管理人名称”", HTML)
+        self.assertIn("CD列“一级标签”", HTML)
+        self.assertIn("《管理人清单》优先", HTML)
+
+    def test_risk_page_var_basis_and_stress(self):
+        self.assertIn("function openRisk()", HTML)
+        self.assertIn("风控页面", HTML)
+        self.assertIn("function historicalVar", HTML)
+        self.assertIn("function basisVar", HTML)
+        self.assertIn("RISK_SCENARIOS", HTML)
+        self.assertIn("股票对冲=指数0.5＋贴水0.5", HTML)
+        self.assertIn("统一使用IM贴水代理", HTML)
+
+    def test_command_guide_lists_one_command_per_row(self):
+        self.assertIn("function renderCommandGuide()", HTML)
+        self.assertIn("首次安装与分享设置", HTML)
+        self.assertIn("数据下载与整理", HTML)
+        self.assertIn("网页生成与运行", HTML)
+        self.assertIn("检查与测试", HTML)
+        self.assertIn("每次只复制并执行一整行", HTML)
 
     def test_calculated_count_requires_both_valuation_boundaries(self):
         self.assertIn("function nonTradingDate(d)", HTML)
