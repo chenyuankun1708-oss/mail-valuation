@@ -96,7 +96,8 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("risk.textContent='风控页面'", HTML)
         self.assertIn("underlying.textContent='底层分析'", HTML)
         self.assertIn("网页更新时间：", HTML)
-        self.assertIn("'932000','868008','NH0100','IXIC'", HTML)
+        self.assertIn("'000852','000905','000300','932000'", HTML)
+        self.assertNotIn("'868008','NH0100','IXIC'", HTML)
         self.assertIn("其他组", HTML)
         self.assertIn("中金财富私享1554号FOF单一资产管理计划", HTML)
         self.assertIn("国金资管盛乾同行5号FOF单一资产管理计划", HTML)
@@ -195,10 +196,13 @@ class StaticCalculationTest(unittest.TestCase):
 
     def test_calculated_count_requires_both_valuation_boundaries(self):
         self.assertIn("function nonTradingDate(d)", HTML)
-        self.assertIn("boundaryComplete(prior,start)&&boundaryComplete(last,end)", HTML)
+        self.assertIn("(inception||boundaryComplete(prior,start))&&boundaryComplete(last,end)", HTML)
         self.assertIn("complete=valid.filter(x=>x.boundary_complete)", HTML)
         self.assertIn("calculated:complete.length", HTML)
         self.assertNotIn("calculated:valid.length", HTML)
+        self.assertIn("status:'not_started'", HTML)
+        self.assertIn("所选结束日期时产品尚未成立", HTML)
+        self.assertIn("total:eligible.length", HTML)
 
 
 if __name__ == "__main__":

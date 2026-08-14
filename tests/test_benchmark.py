@@ -67,8 +67,6 @@ class BenchmarkCacheTest(unittest.TestCase):
         self.assertTrue(all(":code" in query for query, _ in connection.calls))
         calls = {params["code"]: query for query, params in connection.calls}
         self.assertIn("THIRDPARTYINDEXEOD", calls["NH0100.NHF"])
-        self.assertIn("GLOBALINDEXEOD", calls["IXIC.GI"])
-        self.assertIn("AIndexEODPrices", calls["868008.WI"])
         self.assertNotIn("000852.SH", QUERY)
         self.assertEqual(cache["source"], SOURCE_NAME)
         for code in INDICES:

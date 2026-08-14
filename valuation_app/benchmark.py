@@ -20,8 +20,6 @@ INDICES = OrderedDict([
     ("000922", {"name": "中证红利", "wind_code": "000922.CSI", "table": "AIndexEODPrices"}),
     ("399303", {"name": "国证2000", "wind_code": "399303.SZ", "table": "AIndexEODPrices"}),
     ("NH0100", {"name": "南华商品指数", "wind_code": "NH0100.NHF", "table": "THIRDPARTYINDEXEOD"}),
-    ("868008", {"name": "万得微盘股指数", "wind_code": "868008.WI", "table": "AIndexEODPrices"}),
-    ("IXIC", {"name": "纳斯达克综合指数", "wind_code": "IXIC.GI", "table": "GLOBALINDEXEOD"}),
 ])
 SOURCE_NAME = "Wind Oracle数据库"
 DEFAULT_CACHE = os.path.join("market_data", "index_daily.json")
