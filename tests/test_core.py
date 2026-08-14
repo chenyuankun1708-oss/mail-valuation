@@ -6,10 +6,15 @@ import xlrd
 
 from valuation_app.analytics import analyze
 from valuation_app.config import PRODUCTS, match_product
-from valuation_app.parser import Snapshot, _metric_nearest, _parse_holdings, parse_valuation, scan_valuations
+from valuation_app.parser import Snapshot, _find_date, _metric_nearest, _parse_holdings, parse_valuation, scan_valuations
 
 
 class CoreTest(unittest.TestCase):
+    def test_valuation_date_does_not_truncate_november_or_december(self):
+        self.assertEqual(_find_date([["估值日期：2025-12-30"]], "mail_2025-01-02.xls"), "2025-12-30")
+        self.assertEqual(_find_date([["估值日期：2025-11-09"]], "mail.xls"), "2025-11-09")
+        self.assertEqual(_find_date([], "估值表_20251230.xls"), "2025-12-30")
+
     def test_exact_product_scope(self):
         self.assertEqual(len(PRODUCTS), 17)
         self.assertEqual(match_product("(SALT58)JGFA天玑13号_证券投资基金估值表"), "第一创业天玑13号单一资产管理计划")

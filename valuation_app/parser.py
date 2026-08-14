@@ -9,7 +9,9 @@ import xlrd
 from .config import match_product
 
 
-DATE_RE = re.compile(r"(?<!\d)(20\d{2})[-./年]?(0?[1-9]|1[0-2])[-./月]?(0?[1-9]|[12]\d|3[01])日?(?!\d)")
+# Longer alternatives must come first.  With optional separators, matching
+# ``0?[1-9]`` before ``1[0-2]`` truncated 2025-12-30 to 2025-01-02.
+DATE_RE = re.compile(r"(?<!\d)(20\d{2})[-./年]?(1[0-2]|0?[1-9])[-./月]?(3[01]|[12]\d|0?[1-9])日?(?!\d)")
 
 
 @dataclass
