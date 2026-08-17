@@ -65,6 +65,16 @@ class CoreTest(unittest.TestCase):
             "market_value": 110.0, "valuation_gain": 10.0,
         }])
 
+    def test_holding_parser_excludes_accounting_summary_rows(self):
+        rows = [
+            ["科目代码", "科目名称", "数量", "单位成本", "成本", "成本占净值%", "市价", "市值", "市值占净值%", "估值增值"],
+            ["1109", "以公允价值计量且其变动计入当期损益的其他投资_其他投资", 100, 1, 100, 1, 1.1, 110, 1.1, 10],
+            ["110906", "私募理财产品", 100, 1, 100, 1, 1.1, 110, 1.1, 10],
+            ["11090601", "成本", 100, 1, 100, 1, 1.1, 110, 1.1, 10],
+            ["1109060101", "真实底层产品", 100, 1, 100, 1, 1.1, 110, 1.1, 10],
+        ]
+        self.assertEqual([item["name"] for item in _parse_holdings(rows)], ["真实底层产品"])
+
     def test_parse_estimated_price_header(self):
         rows = [
             [" 科目代码 ", "科目名称", " 数量 ", "单位成本 ", "成 本", "成本占净值比(%) ", "估值价格 ", "市 值", "市值占净值比(%) ", "估值增值"],

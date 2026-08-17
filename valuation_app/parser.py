@@ -139,13 +139,19 @@ def _parse_holdings(rows):
         return row[column] if column is not None and column < len(row) else None
 
     holdings = []
+    summary_names = {
+        "以公允价值计量且其变动计入当期损益的其他投资_其他投资",
+        "私募理财产品",
+        "成本",
+    }
     for row in rows[header_index + 1:]:
         code = str(cell(row, columns["code"]) or "").strip()
         name = str(cell(row, columns["name"]) or "").strip()
         quantity = _number(cell(row, columns["quantity"]))
         price = _number(cell(row, columns["price"]))
         market_value = _number(cell(row, columns["market_value"]))
-        if not code or not name or not code.startswith(("1105", "1108", "1109")):
+        if (not code or not name or name.replace(" ", "") in summary_names
+                or not code.startswith(("1105", "1108", "1109"))):
             continue
         # 汇总/分类行通常没有单位价格；只有叶子持仓才进入明细。
         if not quantity or not price or market_value is None:

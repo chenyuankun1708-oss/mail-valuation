@@ -62,10 +62,37 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("function selectAllUnderlying", HTML)
         self.assertIn("全不选", HTML)
         self.assertIn("绝对收益率", HTML)
+        self.assertIn("item.return_value+=market*rate/100", HTML)
+        self.assertIn("绝对收益率（期末市值加权）", HTML)
+        self.assertIn("收益率覆盖期末市值", HTML)
         self.assertIn("function globalHoldingDetails", HTML)
         self.assertIn("globalPieTip", HTML)
         self.assertIn("globalBarTip", HTML)
         self.assertNotIn("占全部FOF期初资产</th>", HTML)
+
+    def test_holding_matrix_and_portfolio_title(self):
+        self.assertIn("function updatePortfolioPresentation", HTML)
+        self.assertIn("创新金融业务总部fof投资资产组合", HTML)
+        self.assertIn("class=holding-matrix", HTML)
+        self.assertIn("rowspan=${primaryCounts.get(p1)}", HTML)
+        self.assertIn("<th>日涨跌%</th><th>周涨跌%</th>", HTML)
+        self.assertNotIn("<th>成本(万)</th>", HTML)
+        self.assertNotIn("<th>对应基准 / Alpha / Beta</th>", HTML)
+        self.assertIn(".layout{grid-template-columns:390px minmax(0,1fr)}", HTML)
+        self.assertIn(".layout>.panel{min-width:0}", HTML)
+
+    def test_investment_dashboard_navigation_and_placeholders(self):
+        self.assertIn("function initInvestmentDashboard", HTML)
+        self.assertIn("创新金融业务总部FOF投资驾驶舱", HTML)
+        self.assertIn("投资总览", HTML)
+        self.assertIn("收益分析", HTML)
+        self.assertIn("市场与基准", HTML)
+        self.assertIn("持仓与穿透", HTML)
+        self.assertIn("function dashRoute", HTML)
+        self.assertIn("history.pushState", HTML)
+        self.assertIn("Barra因子风险分析", HTML)
+        self.assertIn("底层逐笔交易流水", HTML)
+        self.assertIn("数据接入前保持禁用", HTML)
 
     def test_summary_shows_all_products_current_investment(self):
         self.assertIn("所有产品当前总投资额", HTML)

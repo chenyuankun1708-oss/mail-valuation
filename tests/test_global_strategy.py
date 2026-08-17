@@ -31,7 +31,7 @@ console.log(JSON.stringify(globalStrategySummary()));
         self.assertEqual(result["items"][0]["profit"], 5)
         self.assertEqual(result["items"][0]["count"], 2)
         self.assertEqual([row["rate"] for row in result["items"][0]["holdings"]], [8, -2])
-        self.assertAlmostEqual(result["items"][0]["absolute_return"], 5 / 295 * 100)
+        self.assertAlmostEqual(result["items"][0]["absolute_return"], (100 * 8 + 200 * -2) / 300)
 
 
 if __name__ == "__main__":
