@@ -2,3 +2,4 @@ python-dotenv
 xlrd
 openpyxl
 cx_Oracle<9
+rarfile

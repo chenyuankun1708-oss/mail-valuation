@@ -81,7 +81,7 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn(".layout{grid-template-columns:390px minmax(0,1fr)}", HTML)
         self.assertIn(".layout>.panel{min-width:0}", HTML)
 
-    def test_investment_dashboard_navigation_and_placeholders(self):
+    def test_investment_dashboard_navigation_and_factor_module(self):
         self.assertIn("function initInvestmentDashboard", HTML)
         self.assertIn("创新金融业务总部FOF投资驾驶舱", HTML)
         self.assertIn("投资总览", HTML)
@@ -90,7 +90,9 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("持仓与穿透", HTML)
         self.assertIn("function dashRoute", HTML)
         self.assertIn("history.pushState", HTML)
-        self.assertIn("Barra因子风险分析", HTML)
+        self.assertIn("多因子分析", HTML)
+        self.assertIn("function renderMultiFactor", HTML)
+        self.assertIn("不是MSCI Barra正式风险模型", HTML)
         self.assertIn("底层逐笔交易流水", HTML)
         self.assertIn("数据接入前保持禁用", HTML)
 
@@ -142,6 +144,8 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("python app.py share", HTML)
         self.assertIn("<summary>历史改动</summary>", HTML)
         self.assertIn("2026-08-11", HTML)
+        self.assertIn("2026-08-21", HTML)
+        self.assertIn("错过后登录补跑", HTML)
         self.assertIn("已计算产品", HTML)
 
     def test_self_operated_group_lookthrough_excludes_yanbo(self):

@@ -118,7 +118,7 @@ class BenchmarkCacheTest(unittest.TestCase):
         self.assertIn("WIND_DB_USER", str(caught.exception))
         self.assertIn("WIND_DB_PASSWORD", str(caught.exception))
 
-    def test_page_payload_trims_history_and_preserves_missing_state(self):
+    def test_page_payload_keeps_history_from_2010_and_preserves_missing_state(self):
         with tempfile.TemporaryDirectory() as folder:
             path = os.path.join(folder, "index_daily.json")
             payload = {
@@ -137,7 +137,7 @@ class BenchmarkCacheTest(unittest.TestCase):
             page = page_payload(path, earliest_date="2026-01-01")
         self.assertTrue(page["available"])
         self.assertEqual([p["date"] for p in page["indices"]["000852"]["points"]],
-                         ["2025-12-25", "2026-01-02"])
+                         ["2025-12-01", "2025-12-25", "2026-01-02"])
         self.assertEqual(page["indices"]["000905"]["points"], [])
 
 

@@ -59,6 +59,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_share.ps1
 ## 4. 每日自动更新与开机启动
 
 安装两个当前用户计划任务：登录后启动分享服务，每天18:30更新数据。
+每日刷新任务启用“错过计划后尽快运行”，因此电脑在18:30关机时，会在下次开机并登录后补跑。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install_tasks.ps1
@@ -76,6 +77,9 @@ python app.py refresh --latest-only
 - `logs/cloudflared.log`：隧道日志。
 - `logs/share-server-error.log`：服务启动错误。
 - `logs/refresh.log`：每日邮箱下载、整理和构建结果。
+
+任务计划程序中的最近运行结果为 `0` 表示刷新完整成功。估值表解析库可能输出
+`OLE2 WARNING`，这些警告会写入日志，但不会再被 Windows PowerShell 5 错误地当成脚本失败。
 
 停止服务可在任务计划程序中结束并禁用“FOF Valuation Share”；停止自动更新则禁用
 “FOF Valuation Daily Refresh”。
