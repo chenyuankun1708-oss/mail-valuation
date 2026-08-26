@@ -10,7 +10,7 @@ from email.header import decode_header
 from .config import PRODUCTS, match_product
 
 
-VALUATION_MARKERS = ("估值表", "资产估值", "证券投资基金估值", "四级科目", "净值报告")
+VALUATION_MARKERS = ("估值表", "估值报表", "资产估值", "证券投资基金估值", "四级科目", "净值报告")
 EXCEL_EXTENSIONS = (".xls", ".xlsx")
 
 
@@ -91,6 +91,14 @@ def _existing_hashes(output_dir):
     return hashes
 
 
+def match_valuation_attachment(subject, filename):
+    searchable = "%s %s" % (subject, filename)
+    product = match_product(searchable)
+    if not product or not any(marker in searchable for marker in VALUATION_MARKERS):
+        return None
+    return product
+
+
 def download_valuations(output_dir="products", env_path=".env", latest_only=False, account_users=None):
     configured = accounts(env_path)
     if account_users:
@@ -130,9 +138,8 @@ def download_valuations(output_dir="products", env_path=".env", latest_only=Fals
                     filename = _decode(raw_name)
                     if not filename.lower().endswith(EXCEL_EXTENSIONS):
                         continue
-                    searchable = "%s %s" % (subject, filename)
-                    product = match_product(searchable)
-                    if not product or not any(marker in searchable for marker in VALUATION_MARKERS):
+                    product = match_valuation_attachment(subject, filename)
+                    if not product:
                         continue
                     content = part.get_payload(decode=True)
                     if not content:

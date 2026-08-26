@@ -6,6 +6,7 @@ import sys
 from valuation_app.analytics import analyze
 from valuation_app.benchmark import update_cache as update_benchmark_cache
 from valuation_app.risk import update_cache as update_risk_cache
+from valuation_app.risk import update_portfolio_var_cache
 from valuation_app.underlying_mail import download_underlying_archives
 from valuation_app.underlying_archive import organize_zip_7zip
 from valuation_app.factors import update_cache as update_factor_cache
@@ -60,9 +61,14 @@ def refresh_data(products_dir="products", account_users=None):
     return result
 
 
+def refresh_output(result):
+    """Return a log-safe refresh summary for Windows scheduled tasks."""
+    return json.dumps(result, ensure_ascii=True, indent=2)
+
+
 def main():
     parser = argparse.ArgumentParser(description="从邮件估值表计算单一投资人的收益与收益率")
-    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
+    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "portfolio-var", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
     parser.add_argument("--products-dir", default="products")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -94,6 +100,12 @@ def main():
         print(json.dumps(update_benchmark_cache(), ensure_ascii=False, indent=2))
     elif args.command == "risk":
         print(json.dumps(update_risk_cache(), ensure_ascii=False, indent=2))
+    elif args.command == "portfolio-var":
+        result = update_portfolio_var_cache()
+        path, report = build_index(args.products_dir)
+        result["build"] = {"path": path,
+                           "analyzable_products": report["summary"]["analyzable_products"]}
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "build":
         path, report = build_index(args.products_dir)
         print("已生成：%s；可计算产品：%d" % (path, report["summary"]["analyzable_products"]))
@@ -102,7 +114,7 @@ def main():
         result = analyze(snapshots); result["parse_errors"] = errors
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "refresh":
-        print(json.dumps(refresh_data(args.products_dir, args.account), ensure_ascii=False, indent=2))
+        print(refresh_output(refresh_data(args.products_dir, args.account)))
     elif args.command in ("run", "share"):
         if args.command == "share" and args.host != "127.0.0.1":
             parser.error("share命令只允许使用 --host 127.0.0.1")

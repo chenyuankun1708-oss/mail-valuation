@@ -15,7 +15,7 @@ class RiskVarJavascriptTest(unittest.TestCase):
         lines = HTML.splitlines()
         cls.source = "\n".join(next(line for line in lines if line.startswith(prefix))
                                for prefix in ("function quantile", "function historicalVar",
-                                              "function basisVar"))
+                                              "function yieldVar", "function basisVar"))
 
     def run_js(self, expression):
         completed = subprocess.run(["node", "-e", self.source +
@@ -37,6 +37,14 @@ class RiskVarJavascriptTest(unittest.TestCase):
         self.assertAlmostEqual(result["values"][0]["value"], 4.3, places=9)
         empty = self.run_js("basisVar([],'当月')")
         self.assertIsNone(empty["values"][0]["value"])
+
+    def test_yield_var_uses_adverse_upward_basis_point_tail(self):
+        result = self.run_js("yieldVar([{yield:.02},{yield:.0201},{yield:.0199},{yield:.0202}])")
+        changes = [-2.0, 1.0, 3.0]
+        expected_90 = changes[1] + (changes[2] - changes[1]) * .8
+        self.assertEqual(result["count"], 3)
+        self.assertAlmostEqual(result["values"][0]["value"], expected_90, places=9)
+        self.assertGreaterEqual(result["values"][2]["value"], result["values"][0]["value"])
 
 
 if __name__ == "__main__":

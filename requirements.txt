@@ -3,3 +3,4 @@ xlrd
 openpyxl
 cx_Oracle<9
 rarfile
+rqdatac==3.6.2
