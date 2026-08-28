@@ -52,7 +52,7 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("function holdingLabel", HTML)
         self.assertIn("卡玛", HTML)
         self.assertIn("策略组合分析", HTML)
-        self.assertIn("底层产品净值代理走势", HTML)
+        self.assertIn("底层产品估值价格代理走势", HTML)
         self.assertIn("choices.slice(0,10)", HTML)
         self.assertIn("function openInfo", HTML)
         self.assertIn("资金台账", HTML)
@@ -87,7 +87,13 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("投资总览", HTML)
         self.assertIn("收益分析", HTML)
         self.assertIn("市场与基准", HTML)
-        self.assertIn("持仓与穿透", HTML)
+        self.assertIn("年化波动率", HTML)
+        self.assertIn("市场研究与指数ETF配置看板", HTML)
+        self.assertIn("IF / IC / IM 年化贴水", HTML)
+        self.assertIn("月度指数ETF建议权重", HTML)
+        self.assertNotIn("holdings:'持仓与穿透'", HTML)
+        self.assertNotIn("function renderDashHoldings", HTML)
+        self.assertIn("if(page==='holdings')page='returns'", HTML)
         self.assertIn("function dashRoute", HTML)
         self.assertIn("history.pushState", HTML)
         self.assertIn("多因子分析", HTML)
@@ -97,13 +103,13 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("数据接入前保持禁用", HTML)
 
     def test_summary_shows_all_products_current_investment(self):
-        self.assertIn("所有产品当前总投资额", HTML)
+        self.assertIn("当前投资额 / 底层成本", HTML)
         self.assertIn("products.reduce((s,p)=>s+(p.total_investment||0),0)", HTML)
         self.assertNotIn("['选择区间',start+' 至 '+end]", HTML)
 
     def test_all_products_ending_assets_only_depends_on_end_date(self):
         self.assertIn("products.map(p=>before(p.points,end)).filter(Boolean)", HTML)
-        self.assertIn("<th>所有产品期末资产</th>", HTML)
+        self.assertIn("<th>期末资产 / 底层市值</th>", HTML)
         self.assertNotIn("['区间期末资产',money(valid.reduce", HTML)
 
     def test_group_summaries_and_scope_are_rendered(self):
@@ -247,10 +253,23 @@ class StaticCalculationTest(unittest.TestCase):
     def test_command_guide_lists_one_command_per_row(self):
         self.assertIn("function renderCommandGuide()", HTML)
         self.assertIn("首次安装与分享设置", HTML)
-        self.assertIn("数据下载与整理", HTML)
+        self.assertIn("邮件与估值表", HTML)
+        self.assertIn("行情与专项数据", HTML)
         self.assertIn("网页生成与运行", HTML)
         self.assertIn("检查与测试", HTML)
-        self.assertIn("每次只复制并执行一整行", HTML)
+        self.assertIn("每次复制并执行完整一行", HTML)
+        self.assertIn("class=command-group", HTML)
+        self.assertIn("grid-template-columns:minmax(320px,48%)", HTML)
+        self.assertIn("overflow-wrap:anywhere", HTML)
+        for command in ("underlying-mail", "underlying-organize", "factor",
+                        "market-dashboard", "portfolio-var"):
+            self.assertIn("python app.py " + command, HTML)
+        self.assertIn("function documentTimingChange()", HTML)
+        self.assertIn("邮件与文件、数据库与缓存、数据计算和网页更新", HTML)
+        self.assertIn("logs\\\\refresh.log", HTML)
+        self.assertIn("function documentTailscaleShareChange()", HTML)
+        self.assertIn("Tailscale Funnel", HTML)
+        self.assertIn("setup_tailscale_share.ps1", HTML)
 
     def test_calculated_count_requires_both_valuation_boundaries(self):
         self.assertIn("function nonTradingDate(d)", HTML)
@@ -261,6 +280,51 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("status:'not_started'", HTML)
         self.assertIn("所选结束日期时产品尚未成立", HTML)
         self.assertIn("total:eligible.length", HTML)
+
+
+    def test_project_documents_are_structured_and_include_database_help(self):
+        self.assertIn("structuredCalculationHtml", HTML)
+        self.assertIn("六、风控日报全资产简化VaR", HTML)
+        self.assertIn("风险与米筐数据库", HTML)
+        self.assertIn("get_factor_return", HTML)
+        self.assertIn("sortProjectHistory", HTML)
+
+    def test_holding_rows_open_price_and_market_value_curves(self):
+        self.assertIn("showHoldingHistory", HTML)
+        self.assertIn("drawHoldingComposite", HTML)
+        self.assertIn("淡色柱：投资金额", HTML)
+        self.assertIn("holding-inline-detail", HTML)
+        self.assertIn("showHoldingHistory(this,active", HTML)
+        self.assertIn("holding-detail-link", HTML)
+        self.assertIn("function timeScale", HTML)
+        self.assertIn("function holdingTradingScale", HTML)
+        self.assertIn("横轴：Wind A股交易日", HTML)
+        self.assertIn("交易日历覆盖不足，已回退真实日历轴", HTML)
+
+    def test_monthly_report_and_fof1_subgroups(self):
+        self.assertIn("报告出具", HTML)
+        self.assertIn("downloadMonthlyReport", HTML)
+        self.assertIn("/api/monthly-report?as_of=", HTML)
+        self.assertIn("FULL_MANDATE", HTML)
+        self.assertIn("FOF1_SPECIAL", HTML)
+        self.assertIn("全委组合", HTML)
+        self.assertIn("策略组合", HTML)
+        self.assertIn("专户组合", HTML)
+        self.assertIn("padding-left:48px", HTML)
+        self.assertIn("padding-left:88px", HTML)
+        self.assertIn("parentComplete=!!(calculated&&calculated.boundary_complete)", HTML)
+        self.assertIn("x.parent_complete&&x.period", HTML)
+        self.assertIn("维护与变更记录", HTML)
+        self.assertIn("logs/CHANGELOG.md", HTML)
+        self.assertIn("重要改动五处同步制度", HTML)
+        self.assertIn("中信建投聚智多策略9号FOF单一资产管理计划", HTML)
+        self.assertIn("西南证券嘉盈1号FOF单一资产管理计划", HTML)
+        self.assertIn("function lookthroughGroupRow", HTML)
+        self.assertIn("label.vehicle==='专户'", HTML)
+        self.assertIn("if(h.name===YANBO)return", HTML)
+        self.assertIn("function groupResidual", HTML)
+        self.assertIn("未穿透净资产差额", HTML)
+        self.assertIn("portfolioGroupRows(end)", HTML)
 
 
 if __name__ == "__main__":

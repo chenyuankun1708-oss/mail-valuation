@@ -56,6 +56,16 @@ console.log(JSON.stringify(%s));
         self.assertEqual(result["drawdown_peak"], "2026-01-05")
         self.assertEqual(result["drawdown_trough"], "2026-01-06")
 
+    def test_annual_volatility_requires_twenty_returns(self):
+        short = {"points": [{"date": "2026-01-%02d" % (i + 1), "close": 100 + i}
+                            for i in range(20)]}
+        result = self.evaluate("benchmarkMetrics(%s,'2026-01-01','2026-01-20')" % json.dumps(short))
+        self.assertIsNone(result["annual_volatility"])
+        long = {"points": [{"date": "2026-01-%02d" % (i + 1),
+                            "close": 100 + i + (1 if i % 2 else 0)} for i in range(21)]}
+        result = self.evaluate("benchmarkMetrics(%s,'2026-01-01','2026-01-21')" % json.dumps(long))
+        self.assertIsNotNone(result["annual_volatility"])
+
     def test_copying_benchmark_has_beta_one_and_zero_alpha(self):
         product, benchmark = self.regression_series()
         result = self.evaluate("alphaBeta(%s,%s)" % (json.dumps(product), json.dumps(benchmark)))

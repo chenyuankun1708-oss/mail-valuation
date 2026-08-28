@@ -6,6 +6,7 @@ import time
 import webbrowser
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, quote, urlsplit
 
 from .mail import load_env
 
@@ -56,6 +57,7 @@ def _credentials(env_path):
 def make_handler(index_path, user, password, limiter=None):
     index_path = os.path.abspath(index_path)
     limiter = limiter or AuthLimiter()
+    report_lock = threading.Lock()
     expected = "Basic " + base64.b64encode((user + ":" + password).encode("utf-8")).decode("ascii")
 
     class Handler(BaseHTTPRequestHandler):
@@ -107,8 +109,45 @@ def make_handler(index_path, user, password, limiter=None):
             if include_body:
                 self.wfile.write(body)
 
+        def _serve_monthly_report(self):
+            if not self._authenticate():
+                return
+            parsed = urlsplit(self.path)
+            as_of = parse_qs(parsed.query).get("as_of", [""])[0]
+            if len(as_of) != 10:
+                self.send_error(400, "缺少有效截止日")
+                return
+            root = os.path.dirname(index_path)
+            output_dir = os.path.join(root, ".runtime", "monthly-reports")
+            output = os.path.join(output_dir, "FOF月报_%s.xlsx" % as_of)
+            try:
+                from monthly_report.generate_report import generate_as_of
+                with report_lock:
+                    generate_as_of(as_of, os.path.join(root, "products"),
+                                   os.path.join(root, "专户资金台账.xlsx"), output)
+                with open(output, "rb") as handle:
+                    body = handle.read()
+            except ValueError as exc:
+                self.send_error(400, str(exc))
+                return
+            except Exception as exc:
+                self.send_error(500, "月报生成失败：%s" % exc)
+                return
+            filename = "FOF月报_%s.xlsx" % as_of
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(filename))
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
-            self._serve(True)
+            if urlsplit(self.path).path == "/api/monthly-report":
+                self._serve_monthly_report()
+            else:
+                self._serve(True)
 
         def do_HEAD(self):
             self._serve(False)
@@ -126,8 +165,13 @@ def create_server(index_path="index.html", host="127.0.0.1", port=8000, env_path
     return ThreadingHTTPServer(("127.0.0.1", port), make_handler(index_path, user, password))
 
 
-def serve(index_path="index.html", host="127.0.0.1", port=8000, open_browser=True, env_path=".env"):
+def serve(index_path="index.html", host="127.0.0.1", port=8000, open_browser=True, env_path=".env",
+          timing_callback=None):
+    started = time.perf_counter()
     server = create_server(index_path, host, port, env_path)
+    if timing_callback:
+        timing_callback("finish", "网页服务启动", "服务运行",
+                        time.perf_counter() - started, "success")
     url = "http://127.0.0.1:%s" % server.server_address[1]
     print("受密码保护的收益看板已启动：" + url)
     if open_browser:

@@ -1,92 +1,99 @@
-# 免费小范围分享部署
+# 免费固定地址分享
 
-本项目使用本机Python服务、浏览器基础认证和Cloudflare Quick Tunnel。服务只监听
-`127.0.0.1`，公网访问由Cloudflare提供临时HTTPS地址；重启隧道后地址可能变化。
+本项目默认使用本机Python服务、浏览器基础认证和Tailscale Funnel。Python只监听
+`127.0.0.1`，公网通过固定的 `https://电脑名.tailnet名.ts.net` 地址访问。电脑关机、
+休眠、断网或Python服务停止时，固定域名仍存在，但网页无法访问。
 
-## 1. 设置分享密码
+GitHub Pages不用于本项目：普通Pages是静态托管，无法运行月报下载等Python接口，
+也不应公开承载财务网页。Cloudflare Quick Tunnel继续作为临时应急方案，其网址会变化。
 
-推荐使用交互式脚本，输入内容不会显示在屏幕上：
+## 1. 设置网页密码
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\set_share_credentials.ps1
 ```
 
-也可以手动在项目根目录现有的 `.env` 中加入：
+凭据只写入Git忽略的`.env`。密码至少12位，不要把真实密码写进源码、文档或日志。
 
-在项目根目录现有的 `.env` 中加入：
+## 2. 首次配置Tailscale固定地址
 
-```dotenv
-SHARE_USER=viewer
-SHARE_PASSWORD=请替换为至少12位的随机密码
-```
-
-不要把真实密码写进源码、脚本、文档或日志。修改 `.env` 后需要重启分享服务。
-
-## 2. 安装 cloudflared
+在项目目录运行以下命令；脚本会请求管理员权限，并在尚未安装时通过winget安装Tailscale：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install_cloudflared.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_tailscale_share.ps1
 ```
 
-安装后重新打开终端，并确认：
+首次运行需要在浏览器完成Tailscale登录和Funnel授权。脚本随后启动密码保护的Python网页，
+启用持久后台Funnel，并把固定地址写入：
 
 ```powershell
-.\.runtime\cloudflared.exe --version
+Get-Content .\logs\share-url.txt
 ```
 
-## 3. 手动测试
+访问固定地址时仍需输入`.env`中的`SHARE_USER`和`SHARE_PASSWORD`。
 
-终端一：
+## 3. 手工启动和故障恢复
 
 ```powershell
-python app.py share --no-browser
+powershell -ExecutionPolicy Bypass -File .\scripts\start_tailscale_share.ps1
 ```
 
-终端二：
+脚本会检查Tailscale登录、MagicDNS、网页凭据、8000端口、本机网页和Funnel；已有网页服务
+时不会重复启动。常用检查：
 
 ```powershell
-.\.runtime\cloudflared.exe tunnel --url http://127.0.0.1:8000
+Get-Content .\logs\share-url.txt
+Get-Content .\logs\tailscale-share.log -Tail 30
+tailscale status
+tailscale funnel status
 ```
 
-将输出的 `https://...trycloudflare.com` 发给访问者。浏览器会要求输入 `.env` 中的用户名和密码。
+如果提示未登录，打开Tailscale客户端完成登录；首次Funnel授权失败时，在管理员PowerShell
+重新运行首次配置脚本。
 
-也可以使用项目脚本，它会持续重连并把当前地址保存到 `logs/share-url.txt`：
+## 4. 开机分享与每日18:30刷新
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\start_share.ps1
-```
-
-## 4. 每日自动更新与开机启动
-
-安装两个当前用户计划任务：登录后启动分享服务，每天18:30更新数据。
-每日刷新任务启用“错过计划后尽快运行”，因此电脑在18:30关机时，会在下次开机并登录后补跑。
+首次配置成功后安装或覆盖两个当前用户计划任务：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install_tasks.ps1
 ```
 
-手动刷新：
+- `FOF Valuation Share`：登录Windows后恢复本机Python网页和Tailscale Funnel。
+- `FOF Valuation Daily Refresh`：每天18:30更新数据；错过后在下次开机登录时补跑。
+
+每日刷新不会主动重算风控日报全资产VaR。手工刷新仍使用：
 
 ```powershell
 python app.py refresh --latest-only
 ```
 
-日志：
+## 5. Cloudflare临时备用
 
-- `logs/share-url.txt`：当前分享网址。
-- `logs/cloudflared.log`：隧道日志。
-- `logs/share-server-error.log`：服务启动错误。
-- `logs/refresh.log`：每日邮箱下载、整理和构建结果。
+Tailscale不可用时，可临时运行原Cloudflare Quick Tunnel：
 
-任务计划程序中的最近运行结果为 `0` 表示刷新完整成功。估值表解析库可能输出
-`OLE2 WARNING`，这些警告会写入日志，但不会再被 Windows PowerShell 5 错误地当成脚本失败。
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_share.ps1
+Get-Content .\logs\share-url.txt
+```
 
-停止服务可在任务计划程序中结束并禁用“FOF Valuation Share”；停止自动更新则禁用
-“FOF Valuation Daily Refresh”。
+备用地址为随机 `*.trycloudflare.com`，隧道重启后可能变化。首次使用前如缺少cloudflared：
 
-## 安全说明
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install_cloudflared.ps1
+```
 
-- 分享页包含财务数据，建议使用至少12位随机密码并只发给必要人员。
-- Quick Tunnel网址不可作为认证手段，真正的访问控制来自页面密码。
-- 浏览器基础认证没有网页内“退出”按钮；关闭全部浏览器窗口，或清除该站点认证缓存后退出。
-- 不要将本机8000端口开放到防火墙，也不要把服务绑定到 `0.0.0.0`。
+## 日志与安全边界
+
+- `logs/share-url.txt`：当前固定地址或最近一次临时地址。
+- `logs/tailscale-share.log`：Tailscale分享启动状态。
+- `logs/share-server-error.log`：本机Python服务错误。
+- `logs/cloudflared.log`：Cloudflare备用隧道日志。
+- `logs/refresh.log`：每日刷新步骤、耗时和退出码。
+
+以上运行文件均由Git忽略，不得写入密码、令牌或登录链接。不要开放本机8000端口，
+也不要把Python服务绑定到`0.0.0.0`。停止公开分享可运行：
+
+```powershell
+tailscale funnel off
+```

@@ -59,6 +59,19 @@ def month_bounds(month_text):
     return start, end
 
 
+def cutoff_bounds(cutoff_text):
+    """Return prior month-end and an exact report cutoff date."""
+    try:
+        end = datetime.strptime(cutoff_text, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        raise ValueError("截止日必须使用 YYYY-MM-DD，例如 2026-08-27")
+    previous_month = end.month - 1 or 12
+    previous_year = end.year if end.month > 1 else end.year - 1
+    start = date(previous_year, previous_month,
+                 calendar.monthrange(previous_year, previous_month)[1])
+    return start, end
+
+
 def point_on_or_before(points, boundary):
     eligible = [point for point in points if point.valuation_date <= iso(boundary)]
     return eligible[-1] if eligible else None
@@ -360,8 +373,7 @@ def build_workbook(metrics, by_product, month_start, end, parse_errors, output):
     return output
 
 
-def generate(month_text, products_dir, ledger_path, output):
-    month_start, end = month_bounds(month_text)
+def _generate_bounds(month_start, end, products_dir, ledger_path, output):
     snapshots, parse_errors = scan_valuations(products_dir)
     by_product = defaultdict(list)
     for snapshot in snapshots:
@@ -378,6 +390,21 @@ def generate(month_text, products_dir, ledger_path, output):
         if item:
             metrics[product] = item
     return build_workbook(metrics, by_product, month_start, end, parse_errors + ledger_errors, output)
+
+
+def generate(month_text, products_dir, ledger_path, output):
+    month_start, end = month_bounds(month_text)
+    return _generate_bounds(month_start, end, products_dir, ledger_path, output)
+
+
+def generate_as_of(cutoff_text, products_dir, ledger_path, output):
+    """Generate the same monthly workbook at an exact cutoff within its fiscal year."""
+    global FISCAL_START, FISCAL_END
+    month_start, end = cutoff_bounds(cutoff_text)
+    fiscal_year = end.year if end.month <= 10 else end.year + 1
+    FISCAL_START = date(fiscal_year - 1, 10, 31)
+    FISCAL_END = date(fiscal_year, 10, 31)
+    return _generate_bounds(month_start, end, products_dir, ledger_path, output)
 
 
 def main():

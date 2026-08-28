@@ -18,7 +18,7 @@ from .mail import _connect, _decode, accounts, load_env
 
 ACCOUNT = "1144123001@qq.com"
 SENDER = "jiachen_dwzq@foxmail.com"
-ATTACHMENT_NAME = "底层资产.rar"
+ATTACHMENT_NAMES = {"底层资产.rar", "fof.rar"}
 ALLOWED_PRODUCTS = {
     "JIAY01": "西南证券嘉盈1号FOF单一资产管理计划",
     "SALT58": "第一创业天玑13号单一资产管理计划",
@@ -31,6 +31,12 @@ EXCLUDED_CODES = {"SBPR93", "SBPR95"}
 MAX_FILES = 500
 MAX_FILE_SIZE = 100 * 1024 * 1024
 MAX_TOTAL_SIZE = 1024 * 1024 * 1024
+
+
+def match_archive_attachment(filename):
+    """Match only archive names used by the fixed trusted sender."""
+    normalized = os.path.basename((filename or "").strip()).lower()
+    return normalized in ATTACHMENT_NAMES or bool(re.match(r"^20\d{6}\.rar$", normalized))
 
 
 def _atomic_json(path, payload):
@@ -235,7 +241,7 @@ def download_underlying_archives(output_dir="底层资产", archive_dir=None,
                 continue
             for part in message.walk():
                 filename = _decode(part.get_filename() or "")
-                if filename.strip().lower() != ATTACHMENT_NAME.lower():
+                if not match_archive_attachment(filename):
                     continue
                 content = part.get_payload(decode=True) or b""
                 digest = hashlib.sha256(content).hexdigest()

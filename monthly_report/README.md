@@ -16,6 +16,8 @@ python monthly_report/generate_report.py --month 2026-07
 monthly_report/output/FOF月报_2026年07月.xlsx
 ```
 
+投资总览也提供“报告出具”：输入任意截止日后，由本机网页服务调用同一生成器并下载 `FOF月报_YYYY-MM-DD.xlsx`。月度起点为上月月末，结束点为输入的实际截止日。网页接口需要通过 `python app.py run` 或 `python app.py share` 启动，静态文件模式不能生成报告。
+
 也可以指定路径：
 
 ```powershell
