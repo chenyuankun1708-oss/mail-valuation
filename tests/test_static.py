@@ -52,6 +52,11 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("function holdingLabel", HTML)
         self.assertIn("卡玛", HTML)
         self.assertIn("策略组合分析", HTML)
+        self.assertNotIn("<th>占FOF期初资产</th>", HTML)
+        self.assertIn("strategy-chart-grid", HTML)
+        self.assertIn("期末市值结构", HTML)
+        self.assertIn("strategyPieTip", HTML)
+        self.assertIn("strategyBarTip", HTML)
         self.assertIn("底层产品估值价格代理走势", HTML)
         self.assertIn("choices.slice(0,10)", HTML)
         self.assertIn("function openInfo", HTML)
@@ -273,6 +278,9 @@ class StaticCalculationTest(unittest.TestCase):
 
     def test_calculated_count_requires_both_valuation_boundaries(self):
         self.assertIn("function nonTradingDate(d)", HTML)
+        self.assertIn("function tradingCalendarDates()", HTML)
+        self.assertIn("if(calendar.includes(d))return false", HTML)
+        self.assertNotIn("!RAW.products.some(p=>p.points.some(x=>x.valuation_date===d))", HTML)
         self.assertIn("(inception||boundaryComplete(prior,start))&&boundaryComplete(last,end)", HTML)
         self.assertIn("complete=valid.filter(x=>x.boundary_complete)", HTML)
         self.assertIn("calculated:complete.length", HTML)
@@ -323,7 +331,10 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("label.vehicle==='专户'", HTML)
         self.assertIn("if(h.name===YANBO)return", HTML)
         self.assertIn("function groupResidual", HTML)
-        self.assertIn("未穿透净资产差额", HTML)
+        self.assertIn("未穿透差额（现金及净应收应付）", HTML)
+        self.assertIn("residual:true", HTML)
+        self.assertIn("r.residual?'—':money(r.profit)", HTML)
+        self.assertNotIn("groupResidualNote", HTML)
         self.assertIn("portfolioGroupRows(end)", HTML)
 
 
