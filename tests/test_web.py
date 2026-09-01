@@ -1,4 +1,5 @@
 import base64
+import gzip
 import http.client
 import os
 import tempfile
@@ -12,10 +13,20 @@ from valuation_app.web import AuthLimiter, _credentials, make_handler
 
 class ShareServerTest(unittest.TestCase):
     def setUp(self):
-        handle, self.index_path = tempfile.mkstemp(suffix=".html")
-        os.close(handle)
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.index_path = os.path.join(self.tempdir.name, "index.html")
         with open(self.index_path, "w", encoding="utf-8") as output:
             output.write("<html>new dashboard</html>")
+        runtime = os.path.join(self.tempdir.name, ".runtime")
+        os.makedirs(runtime)
+        with open(os.path.join(runtime, "page-data.json"), "w", encoding="utf-8") as output:
+            output.write('{"products":[]}')
+        with open(os.path.join(runtime, "app.js"), "w", encoding="utf-8") as output:
+            output.write("window.loaded=true")
+        modules = os.path.join(runtime, "modules")
+        os.makedirs(modules)
+        with open(os.path.join(modules, "factors.json"), "w", encoding="utf-8") as output:
+            output.write('{"status":"ok"}')
         limiter = AuthLimiter(max_failures=2, window_seconds=60)
         self.server = ThreadingHTTPServer(("127.0.0.1", 0),
                                           make_handler(self.index_path, "viewer", "long-password", limiter))
@@ -27,14 +38,15 @@ class ShareServerTest(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(2)
-        os.remove(self.index_path)
+        self.tempdir.cleanup()
 
-    def request(self, authorization=None, client="198.51.100.1"):
+    def request(self, authorization=None, client="198.51.100.1", path="/", extra_headers=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1])
         headers = {"CF-Connecting-IP": client}
         if authorization:
             headers["Authorization"] = authorization
-        connection.request("GET", "/", headers=headers)
+        headers.update(extra_headers or {})
+        connection.request("GET", path, headers=headers)
         response = connection.getresponse()
         body = response.read()
         connection.close()
@@ -53,6 +65,24 @@ class ShareServerTest(unittest.TestCase):
         status, _, body = self.request("Basic " + token, client="198.51.100.2")
         self.assertEqual(status, 200)
         self.assertIn(b"refreshed atomically", body)
+
+    def test_protected_assets_use_gzip_etag_and_conditional_cache(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        status, headers, body = self.request(token, path="/api/page-data",
+                                             extra_headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Encoding"], "gzip")
+        self.assertEqual(gzip.decompress(body), b'{"products":[]}')
+        self.assertIn("ETag", headers)
+        status, _, body = self.request(token, path="/api/page-data",
+                                       extra_headers={"If-None-Match": headers["ETag"]})
+        self.assertEqual(status, 304)
+        self.assertEqual(body, b"")
+        self.assertEqual(self.request(path="/assets/app.js")[0], 401)
+        status, _, body = self.request(token, path="/api/modules/factors")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b'{"status":"ok"}')
+        self.assertEqual(self.request(token, path="/api/modules/not-allowed")[0], 404)
 
     def test_failed_logins_are_rate_limited(self):
         client = "198.51.100.3"

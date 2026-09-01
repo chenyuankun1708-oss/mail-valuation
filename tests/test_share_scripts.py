@@ -20,6 +20,10 @@ class ShareScriptTest(unittest.TestCase):
         self.assertIn("no duplicate was started", text)
         self.assertIn("share-url.txt", text)
         self.assertIn("status --json 2>$null | Out-String", text)
+        self.assertIn("[regex]::Match", text)
+        self.assertNotIn("ConvertFrom-Json", text)
+        self.assertIn("Startup failed at line", text)
+        self.assertNotIn("$_.Exception.Message", text)
         self.assertNotIn("$FunnelOutput | ForEach-Object", text)
 
     def test_task_installer_uses_tailscale_and_keeps_daily_refresh(self):
@@ -28,6 +32,8 @@ class ShareScriptTest(unittest.TestCase):
         self.assertIn("FOF Valuation Share", text)
         self.assertIn("FOF Valuation Daily Refresh", text)
         self.assertIn("-At '18:30'", text)
+        self.assertIn("-RunLevel Highest", text)
+        self.assertIn("[Security.Principal.WindowsBuiltInRole]::Administrator", text)
 
     def test_cloudflare_quick_tunnel_remains_available(self):
         text = read_script("start_share.ps1")

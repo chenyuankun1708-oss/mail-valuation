@@ -18,6 +18,13 @@ function Write-ShareLog([string]$Message) {
     Write-Host $Line
 }
 
+trap {
+    $LineNumber = $_.InvocationInfo.ScriptLineNumber
+    $ErrorType = $_.Exception.GetType().Name
+    Write-ShareLog ("Startup failed at line {0} ({1})." -f $LineNumber, $ErrorType)
+    exit 1
+}
+
 function Find-Tailscale {
     $Command = Get-Command tailscale -ErrorAction SilentlyContinue
     if ($Command) { return $Command.Source }
@@ -53,11 +60,11 @@ if ($EnvText -notmatch '(?m)^\s*SHARE_USER\s*=.+$' -or $EnvText -notmatch '(?m)^
 
 $Tailscale = Find-Tailscale
 $StatusText = (& $Tailscale status --json 2>$null | Out-String)
-$Status = $StatusText | ConvertFrom-Json
-if (-not $Status -or $Status.BackendState -ne 'Running') {
+if ($LASTEXITCODE -ne 0 -or $StatusText -notmatch '"BackendState"\s*:\s*"Running"') {
     throw 'Tailscale is not logged in or connected. Open Tailscale, sign in, and retry.'
 }
-$DnsName = [string]$Status.Self.DNSName
+$DnsMatch = [regex]::Match($StatusText, '"DNSName"\s*:\s*"([^"\\]+)"')
+$DnsName = if ($DnsMatch.Success) { $DnsMatch.Groups[1].Value } else { '' }
 if (-not $DnsName) { throw 'Tailscale did not return a MagicDNS name. Enable MagicDNS and retry.' }
 $DnsName = $DnsName.TrimEnd('.')
 

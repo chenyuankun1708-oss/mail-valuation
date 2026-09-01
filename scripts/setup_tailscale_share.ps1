@@ -52,8 +52,7 @@ if (-not (Test-Path -LiteralPath $TailscalePath)) {
 }
 
 $StatusText = (& $TailscalePath status --json 2>$null | Out-String)
-$Status = $StatusText | ConvertFrom-Json
-if (-not $Status -or $Status.BackendState -ne 'Running') {
+if ($LASTEXITCODE -ne 0 -or $StatusText -notmatch '"BackendState"\s*:\s*"Running"') {
     Write-Host 'Follow the prompt to sign in to Tailscale in your browser.'
     & $TailscalePath up
     if ($LASTEXITCODE -ne 0) { throw 'Tailscale sign-in or connection did not complete.' }

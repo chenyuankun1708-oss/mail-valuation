@@ -1,4 +1,6 @@
 import base64
+import gzip
+import hashlib
 import hmac
 import os
 import threading
@@ -58,6 +60,16 @@ def make_handler(index_path, user, password, limiter=None):
     index_path = os.path.abspath(index_path)
     limiter = limiter or AuthLimiter()
     report_lock = threading.Lock()
+    asset_lock = threading.Lock()
+    asset_cache = {}
+    module_files = {
+        "factors": "factors.json",
+        "market-research": "market-research.json",
+        "underlying-assets": "underlying-assets.json",
+        "ledger-tables": "ledger-tables.json",
+        "label-workbooks": "label-workbooks.json",
+        "portfolio-var": "portfolio-var.json",
+    }
     expected = "Basic " + base64.b64encode((user + ":" + password).encode("utf-8")).decode("ascii")
 
     class Handler(BaseHTTPRequestHandler):
@@ -109,6 +121,51 @@ def make_handler(index_path, user, password, limiter=None):
             if include_body:
                 self.wfile.write(body)
 
+        def _serve_asset(self, path, content_type, cache_control, include_body=True):
+            if not self._authenticate():
+                return
+            try:
+                stat = os.stat(path)
+                key = (path, stat.st_mtime_ns, stat.st_size)
+                with asset_lock:
+                    cached = asset_cache.get(key)
+                if cached is None:
+                    with open(path, "rb") as handle:
+                        raw = handle.read()
+                    cached = (raw, gzip.compress(raw, compresslevel=6),
+                              '"%s"' % hashlib.sha256(raw).hexdigest())
+                    with asset_lock:
+                        for old_key in list(asset_cache):
+                            if old_key[0] == path and old_key != key:
+                                asset_cache.pop(old_key, None)
+                        asset_cache[key] = cached
+                raw, compressed, etag = cached
+            except OSError:
+                self.send_error(503, "Requested page asset has not been generated. Run python app.py build.")
+                return
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", cache_control)
+                self.end_headers()
+                return
+            use_gzip = "gzip" in self.headers.get("Accept-Encoding", "").lower()
+            body = compressed if use_gzip else raw
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", cache_control)
+            self.send_header("ETag", etag)
+            self.send_header("Vary", "Accept-Encoding")
+            if use_gzip:
+                self.send_header("Content-Encoding", "gzip")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            if include_body:
+                self.wfile.write(body)
+
         def _serve_monthly_report(self):
             if not self._authenticate():
                 return
@@ -144,13 +201,44 @@ def make_handler(index_path, user, password, limiter=None):
             self.wfile.write(body)
 
         def do_GET(self):
-            if urlsplit(self.path).path == "/api/monthly-report":
+            route = urlsplit(self.path).path
+            root = os.path.dirname(index_path)
+            if route == "/api/monthly-report":
                 self._serve_monthly_report()
+            elif route == "/api/page-data":
+                self._serve_asset(os.path.join(root, ".runtime", "page-data.json"),
+                                  "application/json; charset=utf-8",
+                                  "private, max-age=0, must-revalidate")
+            elif route.startswith("/api/modules/") and route[len("/api/modules/"):] in module_files:
+                filename = module_files[route[len("/api/modules/"):]]
+                self._serve_asset(os.path.join(root, ".runtime", "modules", filename),
+                                  "application/json; charset=utf-8",
+                                  "private, max-age=0, must-revalidate")
+            elif route == "/assets/app.js":
+                self._serve_asset(os.path.join(root, ".runtime", "app.js"),
+                                  "application/javascript; charset=utf-8",
+                                  "private, max-age=3600")
             else:
                 self._serve(True)
 
         def do_HEAD(self):
-            self._serve(False)
+            route = urlsplit(self.path).path
+            root = os.path.dirname(index_path)
+            if route == "/api/page-data":
+                self._serve_asset(os.path.join(root, ".runtime", "page-data.json"),
+                                  "application/json; charset=utf-8",
+                                  "private, max-age=0, must-revalidate", False)
+            elif route.startswith("/api/modules/") and route[len("/api/modules/"):] in module_files:
+                filename = module_files[route[len("/api/modules/"):]]
+                self._serve_asset(os.path.join(root, ".runtime", "modules", filename),
+                                  "application/json; charset=utf-8",
+                                  "private, max-age=0, must-revalidate", False)
+            elif route == "/assets/app.js":
+                self._serve_asset(os.path.join(root, ".runtime", "app.js"),
+                                  "application/javascript; charset=utf-8",
+                                  "private, max-age=3600", False)
+            else:
+                self._serve(False)
 
         def log_message(self, fmt, *args):
             pass

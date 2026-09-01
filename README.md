@@ -3,6 +3,10 @@
 公网小范围分享、密码设置、Tailscale Funnel固定地址、Cloudflare应急隧道和Windows计划任务的配置方法见
 [SHARING.md](SHARING.md)。
 
+## 网页数据传输
+
+网页生成时才会读取估值表和本机数据库缓存；访客浏览器不会连接Wind、RQData或邮箱。生成结果采用轻量`index.html`、首屏`/api/page-data`和固定白名单模块接口：市场研究、多因子、底层资产、台账/标签工作簿及风控日报VaR仅在打开对应页面时下载。接口和`app.js`沿用网页Basic Auth，响应使用gzip、ETag与私有缓存；白名单之外的文件路径不能通过网页读取。当前首屏压缩传输量由原整页约14.3MB降至约1.8MB，具体大小随估值数据增长而变化。
+
 本项目只做一件事：从邮箱下载指定 17 只单一资产管理计划的估值表，读取资产净值、总份额、单位净值和累计单位净值，估算申购/赎回/分红，计算单一投资人的收益与收益率，并通过本地网页展示。
 
 ## 能否只靠估值表判断现金流
@@ -150,7 +154,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start_tailscale_share.ps1
 Get-Content .\logs\share-url.txt
 ```
 
-固定地址仍依赖本机开机联网，且浏览器仍需输入`.env`中的分享用户名和密码。GitHub Pages不用于部署本项目：普通Pages无法运行Python月报接口，也不提供适合本财务网页的免费私有访问控制。原`scripts/start_share.ps1`继续保留为Cloudflare随机临时域名的应急方案。
+固定地址仍依赖本机开机联网，且浏览器仍需输入`.env`中的分享用户名和密码。`scripts/install_tasks.ps1`会申请一次管理员授权，并将开机分享任务注册为“使用最高权限运行”，以访问Tailscale受保护管道；Tailscale状态字段采用兼容PowerShell 5.1的固定字段提取，不依赖整段JSON反序列化。若任务返回码为1，可用管理员PowerShell重新运行该脚本，并查看`logs/tailscale-share.log`中的失败行号和异常类型。错误日志不写异常正文，避免意外记录授权地址或敏感参数。GitHub Pages不用于部署本项目：普通Pages无法运行Python月报接口，也不提供适合本财务网页的免费私有访问控制。原`scripts/start_share.ps1`继续保留为Cloudflare随机临时域名的应急方案。
 
 ## 数据要求与目录
 

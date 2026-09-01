@@ -7,6 +7,8 @@
 GitHub Pages不用于本项目：普通Pages是静态托管，无法运行月报下载等Python接口，
 也不应公开承载财务网页。Cloudflare Quick Tunnel继续作为临时应急方案，其网址会变化。
 
+浏览器不会直接连接数据库。`build/refresh`在本机读取邮件、估值表和行情缓存，生成轻量HTML及只读JSON；浏览器先取首屏数据，进入市场研究、多因子、底层资产等页面时再取相应模块。所有接口继续要求同一Basic Auth，只允许代码内固定模块名，并使用gzip和ETag减少重复传输。
+
 ## 1. 设置网页密码
 
 ```powershell
@@ -61,6 +63,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_tasks.ps1
 
 - `FOF Valuation Share`：登录Windows后恢复本机Python网页和Tailscale Funnel。
 - `FOF Valuation Daily Refresh`：每天18:30更新数据；错过后在下次开机登录时补跑。
+
+安装脚本会申请管理员授权，并将分享任务注册为“使用最高权限运行”，因为部分Windows安装的Tailscale本地管道仅允许管理员访问。任务计划程序中的最近结果若为`1`，请重新运行上述安装命令，并查看`logs/tailscale-share.log`记录的失败行号和异常类型；日志不会写异常正文、授权地址或凭据。
 
 每日刷新不会主动重算风控日报全资产VaR。手工刷新仍使用：
 

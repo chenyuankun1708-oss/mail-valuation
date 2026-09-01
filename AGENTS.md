@@ -17,7 +17,8 @@
 - 顶层产品及FOF1穿透组合的估值边界必须使用本地Wind白名单A股指数行情日期并集判断交易日；交易日要求请求日当天估值，非交易日才允许向前取值。日历覆盖外的工作日从严按交易日处理，不得根据产品当天是否普遍缺少估值反推休市。
 - 网页“代码指令”必须以统一宽度的分组卡片展示全部公开CLI命令；长PowerShell命令允许换行，不得撑破布局。新增、删除或改变 `app.py` 命令时必须同步更新该页面和README。
 - 所有 `python app.py ...` 命令必须使用单调时钟输出步骤及总耗时：业务JSON保留在stdout，实时计时写stderr。`refresh`须分别披露邮件与文件、数据库与缓存、数据计算和网页更新耗时；18:30计划任务通过`scripts/refresh.ps1`将相同信息和脚本总耗时写入被Git忽略的`logs/refresh.log`，不得记录凭据。
-- 公网分享默认使用Tailscale Funnel固定`*.ts.net`地址，Python服务仍只监听`127.0.0.1`并保留Basic Auth；开机任务调用`start_tailscale_share.ps1`，Cloudflare Quick Tunnel仅作临时备用。不得把含财务数据的网页发布到公开GitHub Pages；分享地址和运行日志继续由Git忽略。
+- 公网分享默认使用Tailscale Funnel固定`*.ts.net`地址，Python服务仍只监听`127.0.0.1`并保留Basic Auth；开机任务必须以最高权限调用`start_tailscale_share.ps1`，确保能够访问本机Tailscale受保护管道，Cloudflare Quick Tunnel仅作临时备用。不得把含财务数据的网页发布到公开GitHub Pages；分享地址和运行日志继续由Git忽略。
+- 网页发布采用轻量入口HTML与受Basic Auth保护的只读数据接口；首屏JSON、脚本及按页面延迟加载的市场研究、多因子、底层资产、台账/标签工作簿和风控日报VaR模块必须启用gzip、ETag及私有缓存。模块路由只能使用代码登记的固定白名单，不得接受任意路径或文件名；访客浏览器不得直连Wind、RQData或邮箱。
 - 原始估值表只读，不改写、不删除；下载以附件内容 SHA-256 去重。
 - 不在源码、日志、测试或文档中写邮箱密码；凭据只从环境变量或被 `.gitignore` 忽略的 `.env` 读取。
 - 现金流事件必须保留判断依据和置信度。不得把估值结果描述成已确认的交易流水。
