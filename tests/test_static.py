@@ -236,9 +236,10 @@ class StaticCalculationTest(unittest.TestCase):
 
     def test_label_field_mapping_is_documented_in_page(self):
         self.assertIn("策略组合分析使用有效一级标签", HTML)
-        self.assertIn("B列“管理人名称”", HTML)
-        self.assertIn("CD列“一级标签”", HTML)
-        self.assertIn("《管理人清单》优先", HTML)
+        self.assertIn("data_sources/product_labels.json", HTML)
+        self.assertIn("迁移后Excel只作为历史备份", HTML)
+        self.assertIn("迁移记录中原管理人清单来源优先", HTML)
+        self.assertIn("python app.py labels-migrate", HTML)
 
     def test_risk_page_var_basis_and_stress(self):
         self.assertIn("function openRisk()", HTML)

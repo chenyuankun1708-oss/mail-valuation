@@ -13,6 +13,7 @@ from valuation_app.underlying_mail import download_underlying_archives
 from valuation_app.underlying_archive import organize_zip_7zip
 from valuation_app.factors import update_cache as update_factor_cache
 from valuation_app.mail import download_valuations
+from valuation_app.labels import migrate_catalog
 from valuation_app.organize import organize_products
 from valuation_app.parser import scan_valuations
 from valuation_app.static import build_index
@@ -87,7 +88,7 @@ def refresh_output(result):
 
 def main():
     parser = argparse.ArgumentParser(description="从邮件估值表计算单一投资人的收益与收益率")
-    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "portfolio-var", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
+    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "portfolio-var", "labels-migrate", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
     parser.add_argument("--products-dir", default="products")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -147,6 +148,17 @@ def main():
         result["build"] = {"path": path,
                            "analyzable_products": report["summary"]["analyzable_products"]}
         print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.command == "labels-migrate":
+        with timing.step("标签Excel一次性迁移", "命令执行"):
+            root = os.path.abspath(os.path.dirname(args.products_dir))
+            result = migrate_catalog(os.path.join(root, "产品标签.xlsx"),
+                                     os.path.join(root, "管理人清单.xlsx"),
+                                     os.path.join(root, "data_sources", "product_labels.json"))
+        print(json.dumps({"path": os.path.join(root, "data_sources", "product_labels.json"),
+                          "schema_version": result["schema_version"],
+                          "revision": result["revision"],
+                          "record_count": len(result["records"]),
+                          "updated_at": result["updated_at"]}, ensure_ascii=False, indent=2))
     elif args.command == "build":
         path, report = build_index(args.products_dir, timing_callback=timing.callback)
         print("已生成：%s；可计算产品：%d" % (path, report["summary"]["analyzable_products"]))
