@@ -36,6 +36,14 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("drawdownPeriod=risk.drawdown_peak&&risk.drawdown_trough", HTML)
         self.assertNotIn("${riskWarn}${drawdownNote}${benchmarkNote}", HTML)
 
+    def test_calculation_method_has_formula_reference_table(self):
+        self.assertIn("function metricFormulaHtml()", HTML)
+        self.assertIn("指标公式速查", HTML)
+        self.assertIn("P = A₁ − A₀ − S + R + D", HTML)
+        self.assertIn("Σ CFᵢ/(1+r)^((tᵢ−t₀)/365) = 0", HTML)
+        self.assertIn("VaRc = Qc((yₜ−yₜ₋₁)×10000)", HTML)
+        self.assertIn("分类、标签匹配、数据来源和边界选择属于规则口径", HTML)
+
     def test_inception_is_decided_by_reconciled_ledger(self):
         self.assertIn("firstInvestment=dated.find(f=>f.amount>0)", HTML)
         self.assertIn("ledgerReconciled=p.total_investment!=null", HTML)
