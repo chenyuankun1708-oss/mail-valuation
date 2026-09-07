@@ -2,6 +2,7 @@ import base64
 import gzip
 import hashlib
 import hmac
+import json
 import os
 import threading
 import time
@@ -11,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 
 from .mail import load_env
+from .labels import LabelConflictError, mutate_catalog
 
 
 class AuthLimiter:
@@ -62,6 +64,7 @@ def make_handler(index_path, user, password, limiter=None):
     report_lock = threading.Lock()
     archive_lock = threading.Lock()
     asset_lock = threading.Lock()
+    label_lock = threading.Lock()
     asset_cache = {}
     module_files = {
         "factors": "factors.json",
@@ -227,6 +230,62 @@ def make_handler(index_path, user, password, limiter=None):
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_json(self, status, payload):
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _read_json(self):
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                raise ValueError("无效Content-Length")
+            if length <= 0 or length > 1024 * 1024:
+                raise ValueError("请求正文大小无效")
+            try:
+                return json.loads(self.rfile.read(length).decode("utf-8"))
+            except Exception:
+                raise ValueError("请求JSON无效")
+
+        def _labels_path(self):
+            return os.path.join(os.path.dirname(index_path), "data_sources", "product_labels.json")
+
+        def _serve_labels(self):
+            if not self._authenticate():
+                return
+            try:
+                with open(self._labels_path(), "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except OSError:
+                self._send_json(503, {"error": "标签JSON不存在，请先执行labels-migrate"})
+                return
+            self._send_json(200, payload)
+
+        def _mutate_labels(self, action, record_id=None):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json()
+                with label_lock:
+                    payload, item = mutate_catalog(
+                        self._labels_path(), action, request.get("values", {}),
+                        request.get("expected_revision"), user, record_id,
+                        os.path.join(os.path.dirname(index_path), "logs", "label-audit.jsonl"))
+                self._send_json(200 if action != "create" else 201,
+                                {"revision": payload["revision"], "updated_at": payload["updated_at"],
+                                 "record": item})
+            except LabelConflictError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except (ValueError, OSError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
         def do_GET(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
@@ -234,6 +293,8 @@ def make_handler(index_path, user, password, limiter=None):
                 self._serve_monthly_report()
             elif route == "/api/valuation-archive":
                 self._serve_valuation_archive()
+            elif route == "/api/labels":
+                self._serve_labels()
             elif route == "/api/page-data":
                 self._serve_asset(os.path.join(root, ".runtime", "page-data.json"),
                                   "application/json; charset=utf-8",
@@ -249,6 +310,30 @@ def make_handler(index_path, user, password, limiter=None):
                                   "private, max-age=0, must-revalidate")
             else:
                 self._serve(True)
+
+        def do_POST(self):
+            if urlsplit(self.path).path == "/api/labels":
+                self._mutate_labels("create")
+            else:
+                self.send_error(404)
+
+        def do_PATCH(self):
+            route = urlsplit(self.path).path
+            prefix = "/api/labels/"
+            record_id = route[len(prefix):] if route.startswith(prefix) else ""
+            if record_id and "/" not in record_id:
+                self._mutate_labels("update", record_id)
+            else:
+                self.send_error(404)
+
+        def do_DELETE(self):
+            route = urlsplit(self.path).path
+            prefix = "/api/labels/"
+            record_id = route[len(prefix):] if route.startswith(prefix) else ""
+            if record_id and "/" not in record_id:
+                self._mutate_labels("deactivate", record_id)
+            else:
+                self.send_error(404)
 
         def do_HEAD(self):
             route = urlsplit(self.path).path
