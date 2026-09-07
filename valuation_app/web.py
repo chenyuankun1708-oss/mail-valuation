@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlsplit
 
 from .mail import load_env
-from .labels import LabelConflictError, mutate_catalog
+from .labels import LabelConflictError, build_label_payload, mutate_catalog
 
 
 class AuthLimiter:
@@ -261,6 +261,14 @@ def make_handler(index_path, user, password, limiter=None):
             try:
                 with open(self._labels_path(), "r", encoding="utf-8") as handle:
                     payload = json.load(handle)
+                page_path = os.path.join(os.path.dirname(index_path), ".runtime", "page-data.json")
+                with open(page_path, "r", encoding="utf-8") as handle:
+                    page = json.load(handle)
+                holding_names = [holding.get("name") for product in page.get("products", [])
+                                 for point in product.get("points", [])
+                                 for holding in point.get("holdings", []) if holding.get("name")]
+                payload["matches"] = build_label_payload(
+                    holding_names, self._labels_path()).get("matches", {})
             except OSError:
                 self._send_json(503, {"error": "标签JSON不存在，请先执行labels-migrate"})
                 return
