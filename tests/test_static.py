@@ -30,6 +30,12 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("最大回撤区间", HTML)
         self.assertIn("区间少于30天", HTML)
 
+    def test_opening_assets_and_drawdown_period_are_metric_cards(self):
+        self.assertIn("['期初资产',money(p.first.net_assets),''],['期末资产'", HTML)
+        self.assertIn("['最大回撤区间',drawdownPeriod,'']", HTML)
+        self.assertIn("drawdownPeriod=risk.drawdown_peak&&risk.drawdown_trough", HTML)
+        self.assertNotIn("${riskWarn}${drawdownNote}${benchmarkNote}", HTML)
+
     def test_inception_is_decided_by_reconciled_ledger(self):
         self.assertIn("firstInvestment=dated.find(f=>f.amount>0)", HTML)
         self.assertIn("ledgerReconciled=p.total_investment!=null", HTML)
