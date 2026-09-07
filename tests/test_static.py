@@ -249,6 +249,16 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("renderDashStrategy()", HTML)
         self.assertIn("data-action=disable", HTML)
 
+    def test_core_report_engine_uses_deterministic_evidenced_rules(self):
+        self.assertIn("function coreReportData()", HTML)
+        self.assertIn("reconciliation=ending-expected", HTML)
+        self.assertIn("单产品贡献≥绝对收益变动10%", HTML)
+        self.assertIn("前三大产品占比≥50%", HTML)
+        self.assertIn("策略占比绝对变化≥5个百分点", HTML)
+        self.assertIn("最大回撤≤-10%", HTML)
+        self.assertIn("年化波动率≥30%", HTML)
+        self.assertIn("不含“其他管理”的风控日报VaR", HTML)
+
     def test_risk_page_var_basis_and_stress(self):
         self.assertIn("function openRisk()", HTML)
         self.assertIn("风控页面", HTML)
