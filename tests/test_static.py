@@ -258,6 +258,13 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("最大回撤≤-10%", HTML)
         self.assertIn("年化波动率≥30%", HTML)
         self.assertIn("不含“其他管理”的风控日报VaR", HTML)
+        self.assertIn("product_flows:productFlows", HTML)
+        self.assertIn("positionAmount=!a?afterValue:!b?-beforeValue:(b.quantity-a.quantity)*b.price", HTML)
+        self.assertIn("return_rate:b.price/a.price-1", HTML)
+        self.assertIn("holding_vs_median:.05", HTML)
+        self.assertIn("strategy_vs_median:.03", HTML)
+        self.assertIn("核心结论", HTML)
+        self.assertIn("底层持仓增减金额（估算）", HTML)
 
     def test_core_report_has_independent_page_and_exports(self):
         self.assertIn("core:'核心汇报'", HTML)
@@ -266,6 +273,8 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("/api/core-report.xlsx", HTML)
         self.assertIn("下载Excel", HTML)
         self.assertIn("打印 / PDF", HTML)
+        self.assertIn("core:'▣'", HTML)
+        self.assertIn("health.style.display=page==='core'?'none':''", HTML)
 
     def test_risk_page_var_basis_and_stress(self):
         self.assertIn("function openRisk()", HTML)
