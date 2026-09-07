@@ -100,7 +100,10 @@ def build_underlying_asset_payload(root, fof_holdings=()):
         normalized = normalize_name(holding)
         if normalized:
             holding_map.append((fof, holding, normalized))
-    for base, _, files in os.walk(root):
+    for base, dirs, files in os.walk(root):
+        # Historical security-level files are preprocessed into the factor cache;
+        # rescanning thousands of them here would duplicate the current exposure page.
+        dirs[:] = [name for name in dirs if name not in ("历史估值表", ".extracting")]
         for filename in files:
             if filename.startswith("~$") or not filename.lower().endswith((".xls", ".xlsx")):
                 continue

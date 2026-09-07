@@ -1,8 +1,10 @@
 .env
+data_sources/
 __pycache__/
 *.pyc
 .pytest_cache/
-logs/
+logs/*
+!logs/CHANGELOG.md
 .runtime/
 products/
 *.xls
@@ -10,3 +12,4 @@ products/
 ~$*
 index.html
 market_data/
+/底层资产/

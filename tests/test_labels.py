@@ -1,9 +1,12 @@
 import os
+import json
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
-from valuation_app.labels import match_label, normalize_name, read_workbook
+from valuation_app.labels import (build_label_payload, load_json_catalog, match_label,
+                                  migrate_catalog, normalize_name, read_workbook)
 
 
 class LabelTest(unittest.TestCase):
@@ -57,6 +60,37 @@ class LabelTest(unittest.TestCase):
                 archive.writestr("xl/worksheets/sheet1.xml", '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>产品名称</t></is></c></row></sheetData></worksheet>')
                 archive.writestr("xl/styles.xml", "<broken")
             self.assertEqual(read_workbook(path)["标签"][0][0], "产品名称")
+
+    def test_catalog_migration_and_json_runtime_source(self):
+        records = [{"manager": "甲", "product": "测试产品", "primary": "CTA",
+                    "raw_primary": "CTA", "secondary": "全品种", "vehicle": "专户",
+                    "source": "产品标签", "sheet": "CTA", "row": 2,
+                    "normalized": normalize_name("测试产品"),
+                    "classification_evidence": "规则说明"}]
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "product_labels.json")
+            with mock.patch("valuation_app.labels.load_catalog", return_value=(records, {}, [])):
+                payload = migrate_catalog("产品标签.xlsx", "管理人清单.xlsx", path)
+            self.assertEqual(payload["schema_version"], 1)
+            self.assertEqual(payload["revision"], 1)
+            self.assertTrue(payload["records"][0]["product_id"].startswith("product_"))
+            self.assertEqual(payload["records"][0]["version"], 1)
+            loaded, raw = load_json_catalog(path)
+            self.assertEqual(loaded[0]["classification_evidence"], "规则说明")
+            self.assertEqual(raw["migrated_from"], ["产品标签.xlsx", "管理人清单.xlsx"])
+            result = build_label_payload(["测试产品"], path)
+            self.assertEqual(result["matches"]["测试产品"]["primary"], "CTA")
+
+    def test_disabled_json_record_is_not_used(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "product_labels.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump({"schema_version": 1, "revision": 2, "updated_at": "2026-09-07",
+                           "records": [{"product": "测试产品", "normalized": "测试产品",
+                                        "active": False}]}, handle)
+            records, _payload = load_json_catalog(path)
+            self.assertEqual(records, [])
+            self.assertEqual(build_label_payload(["测试产品"], path)["matches"]["测试产品"]["primary"], "其他")
 
 
 if __name__ == "__main__":

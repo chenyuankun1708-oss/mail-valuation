@@ -204,18 +204,20 @@ def update_cache(path=DEFAULT_CACHE, connect=None, now=None, env_path=".env"):
 
 def page_payload(path=DEFAULT_CACHE, earliest_date=None):
     cache = load_cache(path)
-    cutoff = None
+    # The browser can calculate benchmark periods that predate all current FOF
+    # valuation files, so keep a stable historical window in the generated HTML.
+    cutoff = "2010-01-01"
     if earliest_date:
         try:
-            cutoff = (date.fromisoformat(earliest_date) - timedelta(days=10)).isoformat()
+            product_cutoff = (date.fromisoformat(earliest_date) - timedelta(days=10)).isoformat()
+            cutoff = min(cutoff, product_cutoff)
         except ValueError:
             pass
     indices = OrderedDict()
     for code, details in INDICES.items():
         raw = cache.get("indices", {}).get(code, {})
         points = raw.get("points") or []
-        if cutoff:
-            points = [point for point in points if point.get("date", "") >= cutoff]
+        points = [point for point in points if point.get("date", "") >= cutoff]
         indices[code] = {
             "code": code, "name": details["name"],
             "updated_at": raw.get("updated_at"), "error": raw.get("error"),
