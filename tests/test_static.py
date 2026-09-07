@@ -222,13 +222,12 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertNotIn("${benchmarkNote}<canvas id=chart", HTML)
 
 
-    def test_fixed_report_and_top_project_links(self):
+    def test_legacy_generated_report_button_is_removed(self):
         self.assertIn("function openReport()", HTML)
-        self.assertIn("生成报告", HTML)
-        self.assertIn("导出PDF / 打印报告", HTML)
-        self.assertIn("整体各组收益表现", HTML)
-        self.assertIn("各策略最好和最差的底层产品", HTML)
         self.assertIn("function promoteTopControls()", HTML)
+        self.assertIn("function removeLegacyReportButton()", HTML)
+        self.assertIn("#dashReport .report-button", HTML)
+        self.assertIn("initInvestmentDashboard();removeLegacyReportButton()", HTML)
         self.assertIn("section.style.display='none'", HTML)
         self.assertIn("function reportAllStrategyShares()", HTML)
         self.assertIn("所有策略占比", HTML)
@@ -265,6 +264,9 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("strategy_vs_median:.03", HTML)
         self.assertIn("核心结论", HTML)
         self.assertIn("底层持仓增减金额（估算）", HTML)
+        self.assertIn("CORE_LOOKTHROUGH_FOFS", HTML)
+        self.assertIn("顶层产品申购完整记录", HTML)
+        self.assertIn("narrativeParagraphs.join('\\n\\n')", HTML)
 
     def test_core_report_has_independent_page_and_exports(self):
         self.assertIn("core:'核心汇报'", HTML)
