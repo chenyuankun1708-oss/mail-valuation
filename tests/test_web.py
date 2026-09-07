@@ -136,6 +136,20 @@ class ShareServerTest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.tempdir.name, "logs", "label-audit.jsonl")))
         self.assertTrue(os.path.isdir(os.path.join(self.tempdir.name, "data_sources", "label_backups")))
 
+    def test_core_report_excel_is_authenticated(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        payload = json.dumps({"summary": {}, "attention": [], "contributions": [],
+                              "concentration": {}, "risk": {}, "quality": {},
+                              "holding_changes": []}).encode("utf-8")
+        self.assertEqual(self.request(path="/api/core-report.xlsx", method="POST", body=payload,
+                                      extra_headers={"Content-Type": "application/json"})[0], 401)
+        status, headers, body = self.request(token, path="/api/core-report.xlsx", method="POST",
+                                             body=payload,
+                                             extra_headers={"Content-Type": "application/json"})
+        self.assertEqual(status, 200)
+        self.assertIn("spreadsheetml", headers["Content-Type"])
+        self.assertTrue(body.startswith(b"PK"))
+
     def test_failed_logins_are_rate_limited(self):
         client = "198.51.100.3"
         self.assertEqual(self.request("Basic wrong", client)[0], 401)

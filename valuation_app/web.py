@@ -294,6 +294,27 @@ def make_handler(index_path, user, password, limiter=None):
             except (ValueError, OSError) as exc:
                 self._send_json(400, {"error": str(exc)})
 
+        def _serve_core_report_export(self):
+            if not self._authenticate():
+                return
+            try:
+                from .core_report_export import export_core_report
+                body = export_core_report(self._read_json())
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            except Exception as exc:
+                self._send_json(500, {"error": "核心汇报导出失败（%s）" % type(exc).__name__})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''core-report.xlsx")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
@@ -322,6 +343,8 @@ def make_handler(index_path, user, password, limiter=None):
         def do_POST(self):
             if urlsplit(self.path).path == "/api/labels":
                 self._mutate_labels("create")
+            elif urlsplit(self.path).path == "/api/core-report.xlsx":
+                self._serve_core_report_export()
             else:
                 self.send_error(404)
 
