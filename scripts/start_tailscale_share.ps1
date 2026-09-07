@@ -61,7 +61,16 @@ if ($EnvText -notmatch '(?m)^\s*SHARE_USER\s*=.+$' -or $EnvText -notmatch '(?m)^
 $Tailscale = Find-Tailscale
 $StatusText = (& $Tailscale status --json 2>$null | Out-String)
 if ($LASTEXITCODE -ne 0 -or $StatusText -notmatch '"BackendState"\s*:\s*"Running"') {
-    throw 'Tailscale is not logged in or connected. Open Tailscale, sign in, and retry.'
+    $TailscaleIpn = Join-Path (Split-Path -Parent $Tailscale) 'tailscale-ipn.exe'
+    if (Test-Path -LiteralPath $TailscaleIpn) {
+        Start-Process -FilePath $TailscaleIpn -WindowStyle Hidden | Out-Null
+        Write-ShareLog 'Tailscale was not ready; the desktop client was started automatically.'
+        Start-Sleep -Seconds 5
+        $StatusText = (& $Tailscale status --json 2>$null | Out-String)
+    }
+    if ($LASTEXITCODE -ne 0 -or $StatusText -notmatch '"BackendState"\s*:\s*"Running"') {
+        throw 'Tailscale is not logged in or connected. Open Tailscale, sign in, and retry.'
+    }
 }
 $DnsMatch = [regex]::Match($StatusText, '"DNSName"\s*:\s*"([^"\\]+)"')
 $DnsName = if ($DnsMatch.Success) { $DnsMatch.Groups[1].Value } else { '' }

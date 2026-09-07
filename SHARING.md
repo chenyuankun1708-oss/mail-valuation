@@ -66,6 +66,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install_tasks.ps1
 
 安装脚本会申请管理员授权，并将分享任务注册为“使用最高权限运行”，因为部分Windows安装的Tailscale本地管道仅允许管理员访问。任务计划程序中的最近结果若为`1`，请重新运行上述安装命令，并查看`logs/tailscale-share.log`记录的失败行号和异常类型；日志不会写异常正文、授权地址或凭据。
 
+若重启后Tailscale后台暂时处于`NoState`，`start_tailscale_share.ps1`会自动启动`tailscale-ipn.exe`并等待连接后继续；若仍失败，再人工打开Tailscale确认登录状态。
+
 每日刷新不会主动重算风控日报全资产VaR。手工刷新仍使用：
 
 ```powershell

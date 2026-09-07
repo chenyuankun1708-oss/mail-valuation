@@ -21,6 +21,8 @@ class ShareScriptTest(unittest.TestCase):
         self.assertIn("share-url.txt", text)
         self.assertIn("status --json 2>$null | Out-String", text)
         self.assertIn("[regex]::Match", text)
+        self.assertIn("tailscale-ipn.exe", text)
+        self.assertIn("desktop client was started automatically", text)
         self.assertNotIn("ConvertFrom-Json", text)
         self.assertIn("Startup failed at line", text)
         self.assertNotIn("$_.Exception.Message", text)

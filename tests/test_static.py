@@ -313,6 +313,8 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("报告出具", HTML)
         self.assertIn("downloadMonthlyReport", HTML)
         self.assertIn("/api/monthly-report?as_of=", HTML)
+        self.assertIn("/api/valuation-archive?date=", HTML)
+        self.assertIn("生成并下载估值表压缩包", HTML)
         self.assertIn("FULL_MANDATE", HTML)
         self.assertIn("FOF1_SPECIAL", HTML)
         self.assertIn("全委组合", HTML)

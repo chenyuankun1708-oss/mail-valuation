@@ -60,6 +60,7 @@ def make_handler(index_path, user, password, limiter=None):
     index_path = os.path.abspath(index_path)
     limiter = limiter or AuthLimiter()
     report_lock = threading.Lock()
+    archive_lock = threading.Lock()
     asset_lock = threading.Lock()
     asset_cache = {}
     module_files = {
@@ -200,11 +201,39 @@ def make_handler(index_path, user, password, limiter=None):
             self.end_headers()
             self.wfile.write(body)
 
+        def _serve_valuation_archive(self):
+            if not self._authenticate():
+                return
+            parsed = urlsplit(self.path)
+            valuation_date = parse_qs(parsed.query).get("date", [""])[0]
+            root = os.path.dirname(index_path)
+            try:
+                from .valuation_archive import build_valuation_archive
+                with archive_lock:
+                    body, count = build_valuation_archive(os.path.join(root, "products"), valuation_date)
+            except ValueError as exc:
+                self.send_error(400, str(exc))
+                return
+            except Exception as exc:
+                self.send_error(500, "估值表压缩包生成失败：%s" % type(exc).__name__)
+                return
+            filename = "估值表_%s_%s份.zip" % (valuation_date, count)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(filename))
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
             if route == "/api/monthly-report":
                 self._serve_monthly_report()
+            elif route == "/api/valuation-archive":
+                self._serve_valuation_archive()
             elif route == "/api/page-data":
                 self._serve_asset(os.path.join(root, ".runtime", "page-data.json"),
                                   "application/json; charset=utf-8",
@@ -217,7 +246,7 @@ def make_handler(index_path, user, password, limiter=None):
             elif route == "/assets/app.js":
                 self._serve_asset(os.path.join(root, ".runtime", "app.js"),
                                   "application/javascript; charset=utf-8",
-                                  "private, max-age=3600")
+                                  "private, max-age=0, must-revalidate")
             else:
                 self._serve(True)
 
@@ -236,7 +265,7 @@ def make_handler(index_path, user, password, limiter=None):
             elif route == "/assets/app.js":
                 self._serve_asset(os.path.join(root, ".runtime", "app.js"),
                                   "application/javascript; charset=utf-8",
-                                  "private, max-age=3600", False)
+                                  "private, max-age=0, must-revalidate", False)
             else:
                 self._serve(False)
 

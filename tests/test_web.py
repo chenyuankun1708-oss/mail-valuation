@@ -5,6 +5,7 @@ import os
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from http.server import ThreadingHTTPServer
 
@@ -83,6 +84,18 @@ class ShareServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body, b'{"status":"ok"}')
         self.assertEqual(self.request(token, path="/api/modules/not-allowed")[0], 404)
+
+    def test_valuation_archive_download_is_authenticated(self):
+        self.assertEqual(self.request(path="/api/valuation-archive?date=2026-09-02")[0], 401)
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        with patch("valuation_app.valuation_archive.build_valuation_archive",
+                   return_value=(b"zip-content", 3)):
+            status, headers, body = self.request(
+                token, path="/api/valuation-archive?date=2026-09-02")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "application/zip")
+        self.assertIn("2026-09-02", headers["Content-Disposition"])
+        self.assertEqual(body, b"zip-content")
 
     def test_failed_logins_are_rate_limited(self):
         client = "198.51.100.3"
