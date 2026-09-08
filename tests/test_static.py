@@ -227,7 +227,7 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("function promoteTopControls()", HTML)
         self.assertIn("function removeLegacyReportButton()", HTML)
         self.assertIn("#dashReport .report-button", HTML)
-        self.assertIn("initInvestmentDashboard();removeLegacyReportButton()", HTML)
+        self.assertIn("initInvestmentDashboard();installKnowledgeNav();removeLegacyReportButton()", HTML)
         self.assertIn("section.style.display='none'", HTML)
         self.assertIn("function reportAllStrategyShares()", HTML)
         self.assertIn("所有策略占比", HTML)
@@ -247,6 +247,14 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("refreshLabelDependentViews(catalog)", HTML)
         self.assertIn("renderDashStrategy()", HTML)
         self.assertIn("data-action=disable", HTML)
+
+    def test_local_knowledge_base_page_and_commands(self):
+        self.assertIn("knowledge:'知识库'", HTML)
+        self.assertIn("function renderKnowledge()", HTML)
+        self.assertIn("/api/knowledge/upload", HTML)
+        self.assertIn("/api/knowledge/import-inbox", HTML)
+        self.assertIn("python app.py knowledge-check", HTML)
+        self.assertIn("knowledge_base/inbox", HTML)
 
     def test_core_report_engine_uses_deterministic_evidenced_rules(self):
         self.assertIn("function coreReportData()", HTML)

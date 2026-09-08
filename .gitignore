@@ -1,5 +1,6 @@
 .env
 data_sources/
+knowledge_base/
 __pycache__/
 *.pyc
 .pytest_cache/
