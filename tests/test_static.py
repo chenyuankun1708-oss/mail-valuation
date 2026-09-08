@@ -222,13 +222,12 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertNotIn("${benchmarkNote}<canvas id=chart", HTML)
 
 
-    def test_fixed_report_and_top_project_links(self):
+    def test_legacy_generated_report_button_is_removed(self):
         self.assertIn("function openReport()", HTML)
-        self.assertIn("生成报告", HTML)
-        self.assertIn("导出PDF / 打印报告", HTML)
-        self.assertIn("整体各组收益表现", HTML)
-        self.assertIn("各策略最好和最差的底层产品", HTML)
         self.assertIn("function promoteTopControls()", HTML)
+        self.assertIn("function removeLegacyReportButton()", HTML)
+        self.assertIn("#dashReport .report-button", HTML)
+        self.assertIn("initInvestmentDashboard();installKnowledgeNav();removeLegacyReportButton()", HTML)
         self.assertIn("section.style.display='none'", HTML)
         self.assertIn("function reportAllStrategyShares()", HTML)
         self.assertIn("所有策略占比", HTML)
@@ -249,6 +248,33 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("renderDashStrategy()", HTML)
         self.assertIn("data-action=disable", HTML)
 
+    def test_local_knowledge_base_page_and_commands(self):
+        self.assertIn("knowledge:'知识库'", HTML)
+        self.assertIn("function renderKnowledge()", HTML)
+        self.assertIn("/api/knowledge/upload", HTML)
+        self.assertIn("/api/knowledge/import-inbox", HTML)
+        self.assertIn("python app.py knowledge-check", HTML)
+        self.assertIn("knowledge_base/inbox", HTML)
+
+    def test_holding_change_attribution_is_estimated_and_exportable(self):
+        self.assertIn("attribution:'持仓变动归因（估算）'", HTML)
+        self.assertIn("function attributionInterval(fof,a,b)", HTML)
+        self.assertIn("priceImpact=q0*(p1-p0)", HTML)
+        self.assertIn("positionAmount=dq*p1", HTML)
+        self.assertIn("部分可归属", HTML)
+        self.assertIn("现金费用及其他未归属", HTML)
+        self.assertIn("/api/attribution.xlsx", HTML)
+        self.assertIn("if(page==='attribution')renderAttribution()", HTML)
+
+    def test_strategy_lab_is_deferred_and_research_only(self):
+        self.assertIn("market:['market-research','strategy-lab']", HTML)
+        self.assertIn("function renderStrategyLab()", HTML)
+        self.assertIn("function strategyDrivers(item)", HTML)
+        self.assertIn("最近已结束月份形成信号", HTML)
+        self.assertIn("无前视", HTML)
+        self.assertIn("python app.py strategy-lab", HTML)
+        self.assertIn("不生成订单、不连接券商", HTML)
+
     def test_core_report_engine_uses_deterministic_evidenced_rules(self):
         self.assertIn("function coreReportData()", HTML)
         self.assertIn("reconciliation=ending-expected", HTML)
@@ -265,6 +291,9 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("strategy_vs_median:.03", HTML)
         self.assertIn("核心结论", HTML)
         self.assertIn("底层持仓增减金额（估算）", HTML)
+        self.assertIn("CORE_LOOKTHROUGH_FOFS", HTML)
+        self.assertIn("顶层产品申购完整记录", HTML)
+        self.assertIn("narrativeParagraphs.join('\\n\\n')", HTML)
 
     def test_core_report_has_independent_page_and_exports(self):
         self.assertIn("core:'核心汇报'", HTML)

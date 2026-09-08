@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import tempfile
 import threading
 import time
 import webbrowser
@@ -65,10 +66,12 @@ def make_handler(index_path, user, password, limiter=None):
     archive_lock = threading.Lock()
     asset_lock = threading.Lock()
     label_lock = threading.Lock()
+    knowledge_lock = threading.Lock()
     asset_cache = {}
     module_files = {
         "factors": "factors.json",
         "market-research": "market-research.json",
+        "strategy-lab": "strategy-lab.json",
         "underlying-assets": "underlying-assets.json",
         "ledger-tables": "ledger-tables.json",
         "label-workbooks": "label-workbooks.json",
@@ -240,12 +243,12 @@ def make_handler(index_path, user, password, limiter=None):
             self.end_headers()
             self.wfile.write(body)
 
-        def _read_json(self):
+        def _read_json(self, max_length=1024 * 1024):
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 raise ValueError("无效Content-Length")
-            if length <= 0 or length > 1024 * 1024:
+            if length <= 0 or length > max_length:
                 raise ValueError("请求正文大小无效")
             try:
                 return json.loads(self.rfile.read(length).decode("utf-8"))
@@ -315,6 +318,123 @@ def make_handler(index_path, user, password, limiter=None):
             self.end_headers()
             self.wfile.write(body)
 
+        def _serve_attribution_export(self):
+            if not self._authenticate():
+                return
+            try:
+                from .attribution_export import export_attribution
+                body = export_attribution(self._read_json(30 * 1024 * 1024))
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            except Exception as exc:
+                self._send_json(500, {"error": "归因导出失败（%s）" % type(exc).__name__})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''holding-attribution.xlsx")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _knowledge_store(self):
+            from .knowledge import KnowledgeStore
+            return KnowledgeStore(os.path.join(os.path.dirname(index_path), "knowledge_base"))
+
+        def _serve_knowledge_list(self):
+            if not self._authenticate():
+                return
+            parsed = urlsplit(self.path)
+            query = parse_qs(parsed.query).get("q", [""])[0]
+            inactive = parse_qs(parsed.query).get("inactive", ["0"])[0] == "1"
+            try:
+                items = self._knowledge_store().list(query, inactive)
+                self._send_json(200, {"documents": items, "query": query})
+            except (ValueError, OSError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _serve_knowledge_detail(self, document_id):
+            if not self._authenticate():
+                return
+            try:
+                item = self._knowledge_store().get(document_id, True)
+                item.pop("stored_name", None)
+                item["text_content"] = item.get("text_content", "")[:200000]
+                self._send_json(200, item)
+            except (KeyError, ValueError) as exc:
+                self._send_json(404, {"error": str(exc)})
+
+        def _serve_knowledge_download(self, document_id):
+            if not self._authenticate():
+                return
+            try:
+                path, item = self._knowledge_store().file_path(document_id)
+                with open(path, "rb") as handle:
+                    body = handle.read()
+            except (KeyError, ValueError, OSError) as exc:
+                self._send_json(404, {"error": str(exc)})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(item["original_name"]))
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _upload_knowledge(self):
+            if not self._authenticate():
+                return
+            temporary = None
+            try:
+                request = self._read_json(70 * 1024 * 1024)
+                filename = str(request.get("filename") or "")
+                content = base64.b64decode(request.get("content_base64") or "", validate=True)
+                if not content:
+                    raise ValueError("上传文件为空")
+                root = os.path.join(os.path.dirname(index_path), "knowledge_base")
+                from .knowledge import KnowledgeStore, MAX_FILE_SIZE
+                if len(content) > MAX_FILE_SIZE:
+                    raise ValueError("文件超过50MB限制")
+                store = KnowledgeStore(root)
+                with tempfile.NamedTemporaryFile(dir=store.root, delete=False,
+                                                 suffix=os.path.splitext(filename)[1]) as handle:
+                    temporary = handle.name
+                    handle.write(content)
+                with knowledge_lock:
+                    item, duplicate = store.add_file(temporary, dict(request.get("metadata") or {},
+                                                                    title=(request.get("metadata") or {}).get("title") or os.path.splitext(os.path.basename(filename))[0]), filename)
+                self._send_json(200 if duplicate else 201, {"document": item, "duplicate": duplicate})
+            except (ValueError, TypeError, OSError) as exc:
+                self._send_json(400, {"error": str(exc)})
+            finally:
+                if temporary and os.path.exists(temporary):
+                    os.remove(temporary)
+
+        def _import_knowledge_inbox(self):
+            if not self._authenticate():
+                return
+            with knowledge_lock:
+                result = self._knowledge_store().import_inbox()
+            self._send_json(200, result)
+
+        def _mutate_knowledge(self, document_id, deactivate=False):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json()
+                with knowledge_lock:
+                    store = self._knowledge_store()
+                    item = store.deactivate(document_id, request.get("expected_revision")) if deactivate else store.update(document_id, request.get("values") or {}, request.get("expected_revision"))
+                self._send_json(200, {"document": item})
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except (ValueError, TypeError, OSError) as exc:
+                self._send_json(409 if "其他页面" in str(exc) else 400, {"error": str(exc)})
+
         def do_GET(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
@@ -324,6 +444,16 @@ def make_handler(index_path, user, password, limiter=None):
                 self._serve_valuation_archive()
             elif route == "/api/labels":
                 self._serve_labels()
+            elif route == "/api/knowledge":
+                self._serve_knowledge_list()
+            elif route.startswith("/api/knowledge/"):
+                parts = route.strip("/").split("/")
+                if len(parts) == 3 and parts[2].isdigit():
+                    self._serve_knowledge_detail(parts[2])
+                elif len(parts) == 4 and parts[2].isdigit() and parts[3] == "download":
+                    self._serve_knowledge_download(parts[2])
+                else:
+                    self.send_error(404)
             elif route == "/api/page-data":
                 self._serve_asset(os.path.join(root, ".runtime", "page-data.json"),
                                   "application/json; charset=utf-8",
@@ -345,11 +475,22 @@ def make_handler(index_path, user, password, limiter=None):
                 self._mutate_labels("create")
             elif urlsplit(self.path).path == "/api/core-report.xlsx":
                 self._serve_core_report_export()
+            elif urlsplit(self.path).path == "/api/attribution.xlsx":
+                self._serve_attribution_export()
+            elif urlsplit(self.path).path == "/api/knowledge/upload":
+                self._upload_knowledge()
+            elif urlsplit(self.path).path == "/api/knowledge/import-inbox":
+                self._import_knowledge_inbox()
             else:
                 self.send_error(404)
 
         def do_PATCH(self):
             route = urlsplit(self.path).path
+            knowledge_prefix = "/api/knowledge/"
+            knowledge_id = route[len(knowledge_prefix):] if route.startswith(knowledge_prefix) else ""
+            if knowledge_id.isdigit():
+                self._mutate_knowledge(knowledge_id)
+                return
             prefix = "/api/labels/"
             record_id = route[len(prefix):] if route.startswith(prefix) else ""
             if record_id and "/" not in record_id:
@@ -359,6 +500,11 @@ def make_handler(index_path, user, password, limiter=None):
 
         def do_DELETE(self):
             route = urlsplit(self.path).path
+            knowledge_prefix = "/api/knowledge/"
+            knowledge_id = route[len(knowledge_prefix):] if route.startswith(knowledge_prefix) else ""
+            if knowledge_id.isdigit():
+                self._mutate_knowledge(knowledge_id, True)
+                return
             prefix = "/api/labels/"
             record_id = route[len(prefix):] if route.startswith(prefix) else ""
             if record_id and "/" not in record_id:

@@ -14,11 +14,13 @@ from valuation_app.underlying_archive import organize_zip_7zip
 from valuation_app.factors import update_cache as update_factor_cache
 from valuation_app.mail import download_valuations
 from valuation_app.labels import migrate_catalog
+from valuation_app.knowledge import KnowledgeStore
 from valuation_app.organize import organize_products
 from valuation_app.parser import scan_valuations
 from valuation_app.static import build_index
 from valuation_app.timing import TimingRecorder
 from valuation_app.web import serve
+from strategy_lab.pipeline import run as run_strategy_lab
 
 
 def refresh_data(products_dir="products", account_users=None, timing=None):
@@ -88,13 +90,15 @@ def refresh_output(result):
 
 def main():
     parser = argparse.ArgumentParser(description="从邮件估值表计算单一投资人的收益与收益率")
-    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "portfolio-var", "labels-migrate", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
+    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "strategy-lab", "portfolio-var", "labels-migrate", "knowledge-add", "knowledge-import", "knowledge-check", "knowledge-reindex", "knowledge-export", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
     parser.add_argument("--products-dir", default="products")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--latest-only", action="store_true", help="下载时仅检查最近2000封邮件")
     parser.add_argument("--account", action="append", help="只使用指定邮箱账号，可重复传入")
+    parser.add_argument("--knowledge-root", default="knowledge_base", help="本地知识库根目录")
+    parser.add_argument("--knowledge-file", help="knowledge-add要导入的单个文件")
     args = parser.parse_args()
     timing = TimingRecorder()
     atexit.register(timing.print_summary)
@@ -141,6 +145,15 @@ def main():
         result["build"] = {"path": path,
                            "analyzable_products": report["summary"]["analyzable_products"]}
         print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.command == "strategy-lab":
+        with timing.step("指数ETF策略研究", "数据计算"):
+            result = run_strategy_lab()
+        path, report = build_index(args.products_dir, timing_callback=timing.callback)
+        print(json.dumps({"status": result.get("status"), "generated_at": result.get("generated_at"),
+                          "latest_signal_date": result.get("latest_signal_date"),
+                          "recommendations": len(result.get("recommendations", [])),
+                          "build": {"path": path, "analyzable_products": report["summary"]["analyzable_products"]}},
+                         ensure_ascii=False, indent=2))
     elif args.command == "portfolio-var":
         with timing.step("风控日报全资产VaR计算", "数据计算"):
             result = update_portfolio_var_cache()
@@ -159,6 +172,23 @@ def main():
                           "revision": result["revision"],
                           "record_count": len(result["records"]),
                           "updated_at": result["updated_at"]}, ensure_ascii=False, indent=2))
+    elif args.command.startswith("knowledge-"):
+        store = KnowledgeStore(args.knowledge_root)
+        with timing.step("本地知识库维护", "命令执行"):
+            if args.command == "knowledge-add":
+                if not args.knowledge_file:
+                    parser.error("knowledge-add必须提供 --knowledge-file")
+                item, duplicate = store.add_file(args.knowledge_file)
+                value = {"document": item, "duplicate": duplicate}
+            elif args.command == "knowledge-import":
+                value = store.import_inbox()
+            elif args.command == "knowledge-check":
+                value = store.integrity_check()
+            elif args.command == "knowledge-reindex":
+                value = store.rebuild_index()
+            else:
+                value = store.export_metadata(os.path.join(args.knowledge_root, "exports", "metadata.json"))
+        print(json.dumps(value, ensure_ascii=False, indent=2))
     elif args.command == "build":
         path, report = build_index(args.products_dir, timing_callback=timing.callback)
         print("已生成：%s；可计算产品：%d" % (path, report["summary"]["analyzable_products"]))
