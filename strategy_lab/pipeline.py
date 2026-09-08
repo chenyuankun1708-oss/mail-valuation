@@ -2,12 +2,15 @@ import os
 from datetime import datetime
 
 from . import BASELINE_VERSION, MODEL_VERSION, SCHEMA_VERSION
+from .attribution import summarize_attribution
 from .backtest import walk_forward
 from .config import ALLOWED_CODES, MIN_TRAIN_MONTHS, STYLE, asset_class
+from .factor_analysis import analyze as analyze_factors
 from .features import attach_targets, feature_rows
 from .model import fit_ridge, predict
 from .portfolio import target_weights, validate
 from .storage import atomic_json, file_hash, read_json
+from .sweep import run_sweep
 
 
 def _series(index_cache, research):
@@ -92,6 +95,9 @@ def run(project_root=".", output_root="strategy_lab_data", now=None):
                                 "etf": etf,
                                 "execution_status": "ETF可用" if etf else "无当时可得合格ETF，仅保留指数研究信号"})
     periods = backtest.get("periods", [])
+    factor_report = analyze_factors(rows) if rows else {}
+    sweep_report = run_sweep(rows, series) if rows else {}
+    attribution_report = summarize_attribution(periods, series) if periods else {}
     validation = {
         "no_lookahead": all(item.get("training_end", "") <= item.get("signal_date", "") for item in periods),
         "out_of_sample_periods": len(periods),
@@ -113,7 +119,9 @@ def run(project_root=".", output_root="strategy_lab_data", now=None):
               "benchmark": "沪深300", "rebalance": "月末信号、下一交易日模拟执行",
               "latest_signal_date": latest.get("signal_date"), "recommendations": recommendations,
               "latest_model": latest, "backtest": backtest, "validation": validation,
-              "model_comparison": model_comparison, "data_lineage": raw["sources"],
+              "model_comparison": model_comparison, "factor_analysis": factor_report,
+              "parameter_sweep": sweep_report, "attribution": attribution_report,
+              "data_lineage": raw["sources"],
               "disclaimer": "研究输出，不生成订单、不连接券商、不构成投资指令。"}
     for name, value in (("raw_snapshot.json", raw), ("clean_snapshot.json", clean),
                         ("factor_snapshot.json", factors), ("result.json", result)):
