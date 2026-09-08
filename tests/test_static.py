@@ -266,6 +266,15 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("/api/attribution.xlsx", HTML)
         self.assertIn("if(page==='attribution')renderAttribution()", HTML)
 
+    def test_strategy_lab_is_deferred_and_research_only(self):
+        self.assertIn("market:['market-research','strategy-lab']", HTML)
+        self.assertIn("function renderStrategyLab()", HTML)
+        self.assertIn("function strategyDrivers(item)", HTML)
+        self.assertIn("最近已结束月份形成信号", HTML)
+        self.assertIn("无前视", HTML)
+        self.assertIn("python app.py strategy-lab", HTML)
+        self.assertIn("不生成订单、不连接券商", HTML)
+
     def test_core_report_engine_uses_deterministic_evidenced_rules(self):
         self.assertIn("function coreReportData()", HTML)
         self.assertIn("reconciliation=ending-expected", HTML)

@@ -20,6 +20,7 @@ from valuation_app.parser import scan_valuations
 from valuation_app.static import build_index
 from valuation_app.timing import TimingRecorder
 from valuation_app.web import serve
+from strategy_lab.pipeline import run as run_strategy_lab
 
 
 def refresh_data(products_dir="products", account_users=None, timing=None):
@@ -89,7 +90,7 @@ def refresh_output(result):
 
 def main():
     parser = argparse.ArgumentParser(description="从邮件估值表计算单一投资人的收益与收益率")
-    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "portfolio-var", "labels-migrate", "knowledge-add", "knowledge-import", "knowledge-check", "knowledge-reindex", "knowledge-export", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
+    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "strategy-lab", "portfolio-var", "labels-migrate", "knowledge-add", "knowledge-import", "knowledge-check", "knowledge-reindex", "knowledge-export", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
     parser.add_argument("--products-dir", default="products")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -144,6 +145,15 @@ def main():
         result["build"] = {"path": path,
                            "analyzable_products": report["summary"]["analyzable_products"]}
         print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif args.command == "strategy-lab":
+        with timing.step("指数ETF策略研究", "数据计算"):
+            result = run_strategy_lab()
+        path, report = build_index(args.products_dir, timing_callback=timing.callback)
+        print(json.dumps({"status": result.get("status"), "generated_at": result.get("generated_at"),
+                          "latest_signal_date": result.get("latest_signal_date"),
+                          "recommendations": len(result.get("recommendations", [])),
+                          "build": {"path": path, "analyzable_products": report["summary"]["analyzable_products"]}},
+                         ensure_ascii=False, indent=2))
     elif args.command == "portfolio-var":
         with timing.step("风控日报全资产VaR计算", "数据计算"):
             result = update_portfolio_var_cache()

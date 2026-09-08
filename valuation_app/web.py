@@ -71,6 +71,7 @@ def make_handler(index_path, user, password, limiter=None):
     module_files = {
         "factors": "factors.json",
         "market-research": "market-research.json",
+        "strategy-lab": "strategy-lab.json",
         "underlying-assets": "underlying-assets.json",
         "ledger-tables": "ledger-tables.json",
         "label-workbooks": "label-workbooks.json",

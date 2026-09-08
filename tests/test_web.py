@@ -30,6 +30,8 @@ class ShareServerTest(unittest.TestCase):
         os.makedirs(modules)
         with open(os.path.join(modules, "factors.json"), "w", encoding="utf-8") as output:
             output.write('{"status":"ok"}')
+        with open(os.path.join(modules, "strategy-lab.json"), "w", encoding="utf-8") as output:
+            output.write('{"schema_version":1,"research_only":true}')
         sources = os.path.join(self.tempdir.name, "data_sources")
         os.makedirs(sources)
         with open(os.path.join(sources, "product_labels.json"), "w", encoding="utf-8") as output:
@@ -91,6 +93,9 @@ class ShareServerTest(unittest.TestCase):
         status, _, body = self.request(token, path="/api/modules/factors")
         self.assertEqual(status, 200)
         self.assertEqual(body, b'{"status":"ok"}')
+        status, _, body = self.request(token, path="/api/modules/strategy-lab")
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body.decode("utf-8"))["research_only"])
         self.assertEqual(self.request(token, path="/api/modules/not-allowed")[0], 404)
 
     def test_valuation_archive_download_is_authenticated(self):
