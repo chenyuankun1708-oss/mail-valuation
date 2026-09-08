@@ -151,6 +151,20 @@ class ShareServerTest(unittest.TestCase):
         self.assertIn("spreadsheetml", headers["Content-Type"])
         self.assertTrue(body.startswith(b"PK"))
 
+    def test_attribution_excel_is_authenticated(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        payload = json.dumps({"summary": {}, "products": [], "underlying": [],
+                              "strategies": [], "managers": [], "actions": [],
+                              "intervals": []}).encode("utf-8")
+        self.assertEqual(self.request(path="/api/attribution.xlsx", method="POST", body=payload,
+                                      extra_headers={"Content-Type": "application/json"})[0], 401)
+        status, headers, body = self.request(token, path="/api/attribution.xlsx", method="POST",
+                                             body=payload,
+                                             extra_headers={"Content-Type": "application/json"})
+        self.assertEqual(status, 200)
+        self.assertIn("spreadsheetml", headers["Content-Type"])
+        self.assertTrue(body.startswith(b"PK"))
+
     def test_knowledge_api_is_authenticated_and_uses_document_ids(self):
         token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
         self.assertEqual(self.request(path="/api/knowledge")[0], 401)

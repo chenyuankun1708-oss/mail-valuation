@@ -317,6 +317,27 @@ def make_handler(index_path, user, password, limiter=None):
             self.end_headers()
             self.wfile.write(body)
 
+        def _serve_attribution_export(self):
+            if not self._authenticate():
+                return
+            try:
+                from .attribution_export import export_attribution
+                body = export_attribution(self._read_json(30 * 1024 * 1024))
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            except Exception as exc:
+                self._send_json(500, {"error": "归因导出失败（%s）" % type(exc).__name__})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''holding-attribution.xlsx")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+
         def _knowledge_store(self):
             from .knowledge import KnowledgeStore
             return KnowledgeStore(os.path.join(os.path.dirname(index_path), "knowledge_base"))
@@ -453,6 +474,8 @@ def make_handler(index_path, user, password, limiter=None):
                 self._mutate_labels("create")
             elif urlsplit(self.path).path == "/api/core-report.xlsx":
                 self._serve_core_report_export()
+            elif urlsplit(self.path).path == "/api/attribution.xlsx":
+                self._serve_attribution_export()
             elif urlsplit(self.path).path == "/api/knowledge/upload":
                 self._upload_knowledge()
             elif urlsplit(self.path).path == "/api/knowledge/import-inbox":

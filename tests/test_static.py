@@ -256,6 +256,16 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("python app.py knowledge-check", HTML)
         self.assertIn("knowledge_base/inbox", HTML)
 
+    def test_holding_change_attribution_is_estimated_and_exportable(self):
+        self.assertIn("attribution:'持仓变动归因（估算）'", HTML)
+        self.assertIn("function attributionInterval(fof,a,b)", HTML)
+        self.assertIn("priceImpact=q0*(p1-p0)", HTML)
+        self.assertIn("positionAmount=dq*p1", HTML)
+        self.assertIn("部分可归属", HTML)
+        self.assertIn("现金费用及其他未归属", HTML)
+        self.assertIn("/api/attribution.xlsx", HTML)
+        self.assertIn("if(page==='attribution')renderAttribution()", HTML)
+
     def test_core_report_engine_uses_deterministic_evidenced_rules(self):
         self.assertIn("function coreReportData()", HTML)
         self.assertIn("reconciliation=ending-expected", HTML)
