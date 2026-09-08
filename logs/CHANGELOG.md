@@ -4,6 +4,9 @@
 
 ## 2026-09-08
 
+- 策略实验室新增M3 LLM双通道：`strategy_lab/llm/` 包含 provider（云端OpenAI兼容API+本地ollama，urllib手写、Python 3.7兼容）、spec（方法论/参数范围/universe白名单schema校验与净化）、generate（prompt注入因子RankIC上下文、JSON提取、重试与云端→本地兜底、版本化落盘llm_runs）、executor（四方法论本地解释执行）；组合约束仍由 portfolio.validate 强制，LLM无法绕过，不执行LLM生成的代码。web.py 新增 POST /api/strategy-lab/llm（后台线程任务）与 GET /api/strategy-lab/task/<id>（轮询），沿用Basic Auth；凭据只从 .env 读取。
+## 2026-09-08
+
 - 投资总览在分组汇总与报告出具之间新增可勾选的顶层FOF收益计算表：默认全选并逐项展示实际估值区间、资产、申购赎回、分红、收益、自然日台账本金占用及XIRR；勾选只更新本表合计，组合XIRR按实际日期现金流重新求解。
 - 修正前端日期加减的本地时区偏移，改用UTC日历日运算，避免在中国时区中自然日循环停留在同一日，并保持既有周期区间计算一致。
 - 完成M4可拆分策略开发框架：新增固定白名单缓存快照、带可用时间的月度因子、扩展窗口Ridge与规则基线、风险预算及权重/换手约束、下一交易日走步回测、0/10/20bp成本敏感性、最新建议和验证状态；未结束月份不冒充月末，完整结果留在本机，网页按需读取轻量摘要，不连接券商或生成订单。
