@@ -1,0 +1,17 @@
+.env
+data_sources/
+knowledge_base/
+strategy_lab_data/
+__pycache__/
+*.pyc
+.pytest_cache/
+logs/*
+!logs/CHANGELOG.md
+.runtime/
+products/
+*.xls
+*.xlsx
+~$*
+index.html
+market_data/
+/底层资产/

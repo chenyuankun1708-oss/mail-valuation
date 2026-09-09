@@ -1,0 +1,7 @@
+python-dotenv
+xlrd
+openpyxl
+cx_Oracle<9
+rarfile
+rqdatac==3.6.2
+pypdf==3.17.4
