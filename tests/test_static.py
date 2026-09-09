@@ -267,13 +267,22 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("if(page==='attribution')renderAttribution()", HTML)
 
     def test_strategy_lab_is_deferred_and_research_only(self):
-        self.assertIn("market:['market-research','strategy-lab']", HTML)
+        self.assertIn("lab:['strategy-lab']", HTML)
         self.assertIn("function renderStrategyLab()", HTML)
         self.assertIn("function strategyDrivers(item)", HTML)
         self.assertIn("最近已结束月份形成信号", HTML)
         self.assertIn("无前视", HTML)
         self.assertIn("python app.py strategy-lab", HTML)
         self.assertIn("不生成订单、不连接券商", HTML)
+
+    def test_strategy_lab_standalone_page(self):
+        self.assertIn("lab:'策略实验室'", HTML)
+        self.assertIn("if(page==='lab')renderStrategyLab()", HTML)
+        self.assertIn("id=dashLab", HTML)
+        self.assertIn("/api/strategy-lab/llm", HTML)
+        self.assertIn("/api/strategy-lab/task/", HTML)
+        self.assertIn("labMethodology", HTML)
+        self.assertIn("生成策略规格", HTML)
 
     def test_core_report_engine_uses_deterministic_evidenced_rules(self):
         self.assertIn("function coreReportData()", HTML)
