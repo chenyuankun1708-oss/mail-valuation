@@ -320,6 +320,20 @@ def make_handler(index_path, user, password, limiter=None):
         def _labels_path(self):
             return os.path.join(os.path.dirname(index_path), "data_sources", "product_labels.json")
 
+        def _serve_strategy_lab_regenerate(self):
+            if not self._authenticate():
+                return
+            try:
+                from strategy_lab.pipeline import run as run_strategy_lab
+                root = _llm_root()
+                result = run_strategy_lab(project_root=root)
+                self._send_json(200, {"status": result.get("status"),
+                                      "generated_at": result.get("generated_at"),
+                                      "latest_signal_date": result.get("latest_signal_date"),
+                                      "recommendations": len(result.get("recommendations") or [])})
+            except Exception as exc:
+                self._send_json(500, {"error": "策略实验室重算失败（%s）" % type(exc).__name__})
+
         def _submit_llm_task(self):
             if not self._authenticate():
                 return
@@ -568,6 +582,8 @@ def make_handler(index_path, user, password, limiter=None):
                 self._mutate_labels("create")
             elif urlsplit(self.path).path == "/api/strategy-lab/llm":
                 self._submit_llm_task()
+            elif urlsplit(self.path).path == "/api/strategy-lab/regenerate":
+                self._serve_strategy_lab_regenerate()
             elif urlsplit(self.path).path == "/api/core-report.xlsx":
                 self._serve_core_report_export()
             elif urlsplit(self.path).path == "/api/attribution.xlsx":
