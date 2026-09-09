@@ -59,6 +59,67 @@ def _credentials(env_path):
     return user, password
 
 
+class LLMTaskManager:
+    """策略实验室 LLM 生成任务：内存存储 + 单工作线程。
+
+    任务只保留最近 20 条，提交即后台执行，前端轮询状态。
+    """
+
+    def __init__(self, max_tasks=20):
+        self.max_tasks = max_tasks
+        self.tasks = {}
+        self.order = []
+        self.lock = threading.Lock()
+
+    def submit(self, methodology, objective):
+        task_id = "%d-%04d" % (int(time.time() * 1000), len(self.order) % 10000)
+        task = {"id": task_id, "status": "running", "methodology": methodology,
+                "objective": objective, "created_at": time.time(),
+                "result": None, "error": None}
+        with self.lock:
+            self.tasks[task_id] = task
+            self.order.append(task_id)
+            while len(self.order) > self.max_tasks:
+                self.tasks.pop(self.order.pop(0), None)
+        thread = threading.Thread(target=self._run, args=(task_id, methodology, objective))
+        thread.daemon = True
+        thread.start()
+        return task_id
+
+    def _run(self, task_id, methodology, objective):
+        try:
+            from strategy_lab.pipeline import run_llm
+            from strategy_lab.llm.provider import load_providers
+            root = os.path.dirname(os.path.abspath(_llm_root()))
+            providers, _note = load_providers()
+            result = run_llm(methodology, objective, project_root=root, providers=providers)
+            with self.lock:
+                if task_id in self.tasks:
+                    self.tasks[task_id]["result"] = {
+                        "status": result.get("status"), "provider": result.get("provider"),
+                        "spec": result.get("spec"), "errors": result.get("errors"),
+                        "generated_at": result.get("generated_at")}
+                    self.tasks[task_id]["status"] = result.get("status", "failed")
+        except Exception as exc:
+            with self.lock:
+                if task_id in self.tasks:
+                    self.tasks[task_id]["status"] = "failed"
+                    self.tasks[task_id]["error"] = "%s: %s" % (type(exc).__name__, exc)
+
+    def get(self, task_id):
+        with self.lock:
+            task = self.tasks.get(task_id)
+            return dict(task) if task else None
+
+
+def _llm_root():
+    """strategy_lab 所在的项目根（web.py 位于 valuation_app/ 下）。"""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+_LLM_METHODOLOGIES = ("risk_parity_score", "momentum_tilt", "value_tilt", "defensive")
+
+
 def make_handler(index_path, user, password, limiter=None):
     index_path = os.path.abspath(index_path)
     limiter = limiter or AuthLimiter()
@@ -67,6 +128,7 @@ def make_handler(index_path, user, password, limiter=None):
     asset_lock = threading.Lock()
     label_lock = threading.Lock()
     knowledge_lock = threading.Lock()
+    llm_tasks = LLMTaskManager()
     asset_cache = {}
     module_files = {
         "factors": "factors.json",
@@ -258,6 +320,35 @@ def make_handler(index_path, user, password, limiter=None):
         def _labels_path(self):
             return os.path.join(os.path.dirname(index_path), "data_sources", "product_labels.json")
 
+        def _submit_llm_task(self):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json()
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            methodology = str(request.get("methodology") or "")
+            objective = str(request.get("objective") or "")[:500]
+            if methodology not in _LLM_METHODOLOGIES:
+                self._send_json(400, {"error": "方法论不在白名单"})
+                return
+            task_id = llm_tasks.submit(methodology, objective)
+            self._send_json(202, {"task_id": task_id, "status": "running",
+                                  "poll": "/api/strategy-lab/task/%s" % task_id})
+
+        def _serve_llm_task(self, task_id):
+            if not self._authenticate():
+                return
+            if not task_id or "/" in task_id:
+                self._send_json(400, {"error": "无效任务ID"})
+                return
+            task = llm_tasks.get(task_id)
+            if task is None:
+                self._send_json(404, {"error": "任务不存在或已过期"})
+                return
+            self._send_json(200, task)
+
         def _serve_labels(self):
             if not self._authenticate():
                 return
@@ -442,6 +533,8 @@ def make_handler(index_path, user, password, limiter=None):
                 self._serve_monthly_report()
             elif route == "/api/valuation-archive":
                 self._serve_valuation_archive()
+            elif route.startswith("/api/strategy-lab/task/"):
+                self._serve_llm_task(route[len("/api/strategy-lab/task/"):])
             elif route == "/api/labels":
                 self._serve_labels()
             elif route == "/api/knowledge":
@@ -473,6 +566,8 @@ def make_handler(index_path, user, password, limiter=None):
         def do_POST(self):
             if urlsplit(self.path).path == "/api/labels":
                 self._mutate_labels("create")
+            elif urlsplit(self.path).path == "/api/strategy-lab/llm":
+                self._submit_llm_task()
             elif urlsplit(self.path).path == "/api/core-report.xlsx":
                 self._serve_core_report_export()
             elif urlsplit(self.path).path == "/api/attribution.xlsx":

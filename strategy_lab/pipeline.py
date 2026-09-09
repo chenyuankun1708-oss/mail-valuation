@@ -119,3 +119,49 @@ def run(project_root=".", output_root="strategy_lab_data", now=None):
                         ("factor_snapshot.json", factors), ("result.json", result)):
         atomic_json(os.path.join(output, name), value)
     return result
+
+
+def run_llm(methodology, objective="", project_root=".", output_root="strategy_lab_data",
+            now=None, providers=None):
+    """LLM 双通道策略生成入口：云端优先本地兜底，spec 校验后执行并回测。
+
+    providers 可注入（测试用 mock）；None 时按环境变量构造。
+    """
+    from .llm.generate import generate_spec, save_run
+    from .llm.provider import load_providers
+    from .llm.executor import execute_spec
+    from .portfolio import target_weights, validate as validate_weights
+    from .factor_analysis import rank_ic_series
+
+    root = os.path.abspath(project_root)
+    output = os.path.abspath(os.path.join(root, output_root))
+    index_cache = read_json(os.path.join(root, "market_data", "index_daily.json"))
+    research = read_json(os.path.join(root, "market_data", "market_research.json"))
+    series = _series(index_cache, research)
+    rows = attach_targets(feature_rows(series, research, as_of=(now or datetime.now()).isoformat()[:10]),
+                          series) if "000300" in series else []
+
+    if providers is None:
+        providers, _note = load_providers()
+    # 因子上下文：最近 RankIC 均值，帮助 LLM 了解因子近期有效性
+    factor_summary = {}
+    if rows:
+        ic = rank_ic_series(rows).get("summary", {})
+        factor_summary = {name: (item or {}).get("mean_ic") for name, item in ic.items()}
+
+    generation = generate_spec(providers, methodology, objective, factor_summary=factor_summary,
+                               now=now)
+    result = dict(generation)
+    result["methodology"] = methodology
+    result["objective"] = objective
+    if generation["status"] == "ok":
+        # 执行 spec：评分 → 约束权重 → 校验
+        current = [row for row in rows if row["date"] == max(r["date"] for r in rows)] if rows else []
+        scores, note = execute_spec(current, generation["spec"])
+        weights = target_weights(current, {code: {"score": value, "components": {}}
+                                            for code, value in scores.items()}) if current else {}
+        result["spec"]["executed"] = {"weights": weights, "constraints": validate_weights(weights),
+                                        "note": note, "signal_date": max(r["date"] for r in rows) if rows else None}
+    path = save_run(output, result, now=now)
+    result["saved_to"] = path
+    return result

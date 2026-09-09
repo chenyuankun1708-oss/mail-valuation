@@ -51,8 +51,9 @@ def export_core_report(data):
         [row.get("kind"), row.get("text"), row.get("rule"), row.get("level")]
         for row in _safe_rows(data.get("attention", [])) if isinstance(row, dict)
     ])
-    _sheet(book, "产品申购赎回", ["日期", "产品", "方向", "金额"], [
-        [row.get("date"), row.get("product"), row.get("direction"), row.get("amount")]
+    _sheet(book, "产品申购赎回汇总", ["产品", "申购合计", "赎回合计", "净流入", "笔数"], [
+        [row.get("product"), row.get("subscription_total"), row.get("redemption_total"),
+         row.get("net_inflow"), row.get("flow_count")]
         for row in _safe_rows(data.get("product_flows", [])) if isinstance(row, dict)
     ])
     _sheet(book, "收益贡献", ["产品", "收益", "期初资产", "期末资产", "状态"], [

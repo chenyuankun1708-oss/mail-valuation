@@ -16,14 +16,14 @@ class CoreReportExportTest(unittest.TestCase):
                         "reconciliation": 0, "calculated": 1, "eligible": 1,
                         "coverage": 1},
             "attention": [{"kind": "收益贡献", "text": "甲贡献10", "rule": "阈值", "level": .5}],
-            "product_flows": [{"date": "2026-02-01", "product": "甲", "direction": "申购", "amount": 10}],
+            "product_flows": [{"product": "甲", "subscription_total": 30, "redemption_total": 10, "net_inflow": 20, "flow_count": 3}],
             "contributions": [{"name": "甲", "profit": 10, "status": "ok",
                                "first": {"net_assets": 100}, "last": {"net_assets": 110}}],
             "concentration": {"products": {"total": 110, "top3": 1, "hhi": 1}},
             "risk": {}, "holding_changes": [], "holding_returns": [], "strategy_returns": [],
         }
         book = openpyxl.load_workbook(io.BytesIO(export_core_report(payload)), data_only=True)
-        self.assertEqual(book.sheetnames, ["核心摘要", "重点事项", "产品申购赎回", "收益贡献",
+        self.assertEqual(book.sheetnames, ["核心摘要", "重点事项", "产品申购赎回汇总", "收益贡献",
                                           "集中度", "风险提示", "底层持仓增减估算",
                                           "底层收益率", "策略收益率"])
         self.assertEqual(book["核心摘要"]["B2"].value, "本期核心结论。")

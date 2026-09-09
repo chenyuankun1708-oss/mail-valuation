@@ -267,13 +267,22 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("if(page==='attribution')renderAttribution()", HTML)
 
     def test_strategy_lab_is_deferred_and_research_only(self):
-        self.assertIn("market:['market-research','strategy-lab']", HTML)
+        self.assertIn("lab:['strategy-lab']", HTML)
         self.assertIn("function renderStrategyLab()", HTML)
         self.assertIn("function strategyDrivers(item)", HTML)
         self.assertIn("最近已结束月份形成信号", HTML)
         self.assertIn("无前视", HTML)
         self.assertIn("python app.py strategy-lab", HTML)
         self.assertIn("不生成订单、不连接券商", HTML)
+
+    def test_strategy_lab_standalone_page(self):
+        self.assertIn("lab:'策略实验室'", HTML)
+        self.assertIn("if(page==='lab')renderStrategyLab()", HTML)
+        self.assertIn("id=dashLab", HTML)
+        self.assertIn("/api/strategy-lab/llm", HTML)
+        self.assertIn("/api/strategy-lab/task/", HTML)
+        self.assertIn("labMethodology", HTML)
+        self.assertIn("生成策略规格", HTML)
 
     def test_core_report_engine_uses_deterministic_evidenced_rules(self):
         self.assertIn("function coreReportData()", HTML)
@@ -284,7 +293,7 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("最大回撤≤-10%", HTML)
         self.assertIn("年化波动率≥30%", HTML)
         self.assertIn("不含“其他管理”的风控日报VaR", HTML)
-        self.assertIn("product_flows:productFlows", HTML)
+        self.assertIn("product_flows:flowSummary", HTML)
         self.assertIn("positionAmount=!a?afterValue:!b?-beforeValue:(b.quantity-a.quantity)*b.price", HTML)
         self.assertIn("return_rate:b.price/a.price-1", HTML)
         self.assertIn("holding_vs_median:.05", HTML)
@@ -292,7 +301,7 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("核心结论", HTML)
         self.assertIn("底层持仓增减金额（估算）", HTML)
         self.assertIn("CORE_LOOKTHROUGH_FOFS", HTML)
-        self.assertIn("顶层产品申购完整记录", HTML)
+        self.assertIn("顶层产品申购按产品汇总", HTML)
         self.assertIn("narrativeParagraphs.join('\\n\\n')", HTML)
 
     def test_core_report_has_independent_page_and_exports(self):

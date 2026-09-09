@@ -36,9 +36,10 @@ def _period_return(series, weights, signal, next_signal):
     return result / available if available > .999 else None
 
 
-def walk_forward(rows, series):
+def walk_forward(rows, series, alpha=None, min_train_months=None):
     dates = sorted(set(row["date"] for row in rows))
     by_date = {day: [row for row in rows if row["date"] == day] for day in dates}
+    min_months = min_train_months if min_train_months is not None else MIN_TRAIN_MONTHS
     histories = {"ridge": {cost: [] for cost in COST_SCENARIOS_BP},
                  "baseline": {cost: [] for cost in COST_SCENARIOS_BP}, "benchmark": []}
     previous = {"ridge": {}, "baseline": {}}
@@ -48,9 +49,9 @@ def walk_forward(rows, series):
         training = [row for row in rows if row.get("target_excess_return") is not None and row.get("target_end", "") <= signal]
         train_months = sorted(set(row["date"] for row in training))
         current = by_date[signal]
-        if len(train_months) < MIN_TRAIN_MONTHS or not current:
+        if len(train_months) < min_months or not current:
             continue
-        model = fit_ridge(training)
+        model = fit_ridge(training, alpha=alpha) if alpha is not None else fit_ridge(training)
         ridge_scores, predictions = {}, []
         for row in current:
             value, contributions = predict(model, row)

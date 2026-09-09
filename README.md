@@ -54,6 +54,13 @@ IMAP2_PASS=your-password
 WIND_DB_USER=your-wind-user
 WIND_DB_PASSWORD=your-wind-password
 WIND_DB_DSN=your-oracle-service-name
+
+# 策略实验室 LLM 双通道（可选；云端优先、本地 ollama 兜底）
+# LLM_API_BASE=https://open.bigmodel.cn/api/paas/v4
+# LLM_API_KEY=your-llm-api-key
+# LLM_MODEL=glm-4.6
+# OLLAMA_URL=http://127.0.0.1:11434
+# OLLAMA_MODEL=qwen2.5:7b
 ```
 
 ## 使用

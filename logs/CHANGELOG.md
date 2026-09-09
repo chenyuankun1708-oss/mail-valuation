@@ -2,6 +2,17 @@
 
 按实际变更日期从近到远记录。这里只记录代码、功能、口径、接口和用户可见行为，不记录密码、令牌、邮箱凭据或其他敏感数据。
 
+## 2026-09-09
+
+- 核心汇报申购赎回改为按产品汇总：网页表格与Excel导出统一为"产品/申购合计/赎回合计/净流入/笔数"五列，核心结论叙述同步按产品汇总（含笔数），不再逐笔列示。
+- 全站UI统一（taste-skill整改）：根调色板由旧米色系统一为驾驶舱蓝灰系（--bg/--card/--line/--green/--red/--gold全部更新）；旧暖色辅助底色（#f7f5ef）统一为蓝灰；h1双字体统一为system-ui；修复popup内联.value样式对全站字号的全局污染（改为.embedded作用域）；按钮5色统一为主绿var(--green)+蓝灰次色；加载态底色与主背景统一。
+
+
+- 策略实验室升级为左侧导航独立页面（从"市场与基准"页尾嵌入卡片迁移）：按"数据与品种→因子分析→策略构建→回测与归因"四步工作流布局，展示数据血缘、ETF 状态胶囊、RankIC 汇总表、高相关因子对提示、LLM 生成面板（方法论下拉+目标输入+任务提交/轮询）、本地 Ridge/基线指标卡、建议权重表、参数扫描与资产贡献归因表；lab 页纳入 DEFERRED_PAGE_MODULES 懒加载白名单，样式遵循 taste-skill 设计规范（tabular-nums、单一主色渐变、统一圆角阴影、hover/active/focus-visible 全状态）。
+
+## 2026-09-08
+
+- 策略实验室新增M3 LLM双通道：`strategy_lab/llm/` 包含 provider（云端OpenAI兼容API+本地ollama，urllib手写、Python 3.7兼容）、spec（方法论/参数范围/universe白名单schema校验与净化）、generate（prompt注入因子RankIC上下文、JSON提取、重试与云端→本地兜底、版本化落盘llm_runs）、executor（四方法论本地解释执行）；组合约束仍由 portfolio.validate 强制，LLM无法绕过，不执行LLM生成的代码。web.py 新增 POST /api/strategy-lab/llm（后台线程任务）与 GET /api/strategy-lab/task/<id>（轮询），沿用Basic Auth；凭据只从 .env 读取。
 ## 2026-09-08
 
 - 投资总览在分组汇总与报告出具之间新增可勾选的顶层FOF收益计算表：默认全选并逐项展示实际估值区间、资产、申购赎回、分红、收益、自然日台账本金占用及XIRR；勾选只更新本表合计，组合XIRR按实际日期现金流重新求解。
