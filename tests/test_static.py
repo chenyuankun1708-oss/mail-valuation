@@ -441,5 +441,40 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("portfolioGroupRows(end)", HTML)
 
 
+import os
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+from valuation_app.static import HTML, DASHBOARD_JS
+
+
+class StaticJSSyntaxTest(unittest.TestCase):
+    """app.js 由 static.py 的巨型字符串拼出，任何语法错误都会导致整站白屏。
+
+    此处把 HTML 内全部 <script> 内容交给 node 做语法编译，
+    在测试阶段拦截漏分号、多余括号等错误（浏览器无法给出可读报错）。
+    """
+
+    def test_all_inline_scripts_compile(self):
+        if not shutil.which("node"):
+            self.skipTest("本机无 node，跳过 JS 语法编译检查")
+        # HTML 内嵌 script 与 DASHBOARD_JS 是同一代码（数据占位符版），
+        # 只编译 DASHBOARD_JS 即可覆盖全部浏览器端 JS。
+        folder = tempfile.mkdtemp()
+        try:
+            path = os.path.join(folder, "syntax_check.js")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(DASHBOARD_JS)
+            result = subprocess.run(
+                ["node", "--check", path], capture_output=True, text=True, timeout=60)
+            self.assertEqual(
+                result.returncode, 0,
+                "app.js 存在语法错误，网页会白屏：\n%s" % result.stderr[:2000])
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()
