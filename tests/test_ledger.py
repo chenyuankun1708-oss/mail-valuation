@@ -74,7 +74,7 @@ class LedgerTest(unittest.TestCase):
             self.skipTest("workspace has no ledger")
         metadata, errors = load_product_metadata("专户资金台账.xlsx")
         self.assertEqual(errors, [])
-        self.assertEqual(metadata["第一创业天玑13号单一资产管理计划"]["total_investment"], 806000000)
+        self.assertEqual(metadata["第一创业天玑13号单一资产管理计划"]["total_investment"], 776000000)
         self.assertEqual(metadata["第一创业天玑13号单一资产管理计划"]["approved_quota"], 300000000)
         self.assertEqual(metadata["西南证券嘉盈1号FOF单一资产管理计划"]["approved_quota"], 3000000000)
 

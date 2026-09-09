@@ -17,9 +17,12 @@ from openpyxl import load_workbook
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".txt", ".md", ".html", ".htm"}
 MAX_FILE_SIZE = 50 * 1024 * 1024
 DOCUMENT_TYPES = {"产品合同", "会议纪要", "产品路演材料", "投资观点", "产品报告", "市场报告", "微信文章", "其他"}
-TYPE_KEYWORDS = (("合同", "产品合同"), ("会议纪要", "会议纪要"), ("路演", "产品路演材料"),
-                 ("投资观点", "投资观点"), ("产品报告", "产品报告"), ("市场报告", "市场报告"),
-                 ("微信", "微信文章"))
+TYPE_KEYWORDS = (("月报", "产品报告"), ("周报", "产品报告"), ("日报", "产品报告"),
+                 ("业绩报告", "产品报告"), ("净值报告", "产品报告"), ("估值表", "产品报告"),
+                 ("路演", "产品路演材料"), ("会议纪要", "会议纪要"), ("纪要", "会议纪要"),
+                 ("合同", "产品合同"), ("协议", "产品合同"),
+                 ("投资观点", "投资观点"), ("市场报告", "市场报告"), ("策略报告", "市场报告"),
+                 ("市场策略", "市场报告"), ("微信", "微信文章"))
 
 
 def _now():
@@ -132,10 +135,20 @@ def extract_text(path):
 def infer_metadata(filename, text):
     sample = (filename + "\n" + (text or "")[:10000]).strip()
     document_type = "其他"
+    # 文件名优先：报告类关键词在文件名中出现即可定型，避免正文偶然提及"合同"等污染
+    filename_sample = filename or ""
     for keyword, value in TYPE_KEYWORDS:
-        if keyword in sample:
+        if keyword in filename_sample:
             document_type = value
             break
+    else:
+        body = (text or "")[:10000]
+        # 正文中只有较强的信号才覆盖：完整词组而非单字
+        for keyword, value in (("投资观点", "投资观点"), ("会议纪要", "会议纪要"),
+                               ("路演材料", "产品路演材料"), ("市场报告", "市场报告")):
+            if keyword in body:
+                document_type = value
+                break
     match = re.search(r"(20\d{2})[-年./](\d{1,2})[-月./](\d{1,2})日?", sample)
     document_date = "%04d-%02d-%02d" % tuple(map(int, match.groups())) if match else ""
     product = ""
@@ -149,8 +162,10 @@ def infer_metadata(filename, text):
         pass
     tags = [keyword for keyword in ("FOF", "量化", "固收", "股票", "CTA", "宏观", "信用", "利率")
             if keyword.lower() in sample.lower()]
+    # 机构识别：只认"公司/资产管理"等完整结尾的机构名，且不超过25字
+    # （排除"本报告仅向特定合格投资者…"这类被截断的免责声明长句）
     organization_match = re.search(
-        r"([\u4e00-\u9fffA-Za-z0-9]{2,40}(?:证券|基金|资产管理|银行|保险|期货|投资|资本)(?:有限责任公司|有限公司|公司)?)",
+        r"([\u4e00-\u9fffA-Za-z0-9]{2,18}(?:证券|基金|资产管理|银行|保险|期货)(?:有限责任公司|有限公司|股份有限公司))",
         sample)
     author_match = re.search(r"(?:作者|主讲|发言人|记录人)\s*[:：]\s*([\u4e00-\u9fff]{2,10})", sample)
     return {"document_type": document_type, "document_date": document_date,
