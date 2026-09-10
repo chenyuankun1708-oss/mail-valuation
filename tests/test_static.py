@@ -253,8 +253,18 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("globalStrategySummary(globalStrategyFilters)", HTML)
         self.assertIn("globalStrategyFilterSelect('department','营业部')", HTML)
         self.assertIn("占筛选结果市值", HTML)
-        self.assertIn("筛选后的同一持仓集合重算", HTML)
+        self.assertIn("筛选后的同一产品集合重算", HTML)
         self.assertIn("data-action=disable", HTML)
+
+    def test_global_strategy_indexes_by_standard_product_name(self):
+        self.assertIn("function strategyProductRows(p)", HTML)
+        self.assertIn("product=indexed?label.product:h.name", HTML)
+        self.assertIn("holdingReport(points,p.inception)", HTML)
+        self.assertIn("strategyProductRows(p).forEach", HTML)
+        self.assertIn("function strategyNameIndexIssues()", HTML)
+        self.assertIn("策略组合产品名称索引提示", HTML)
+        self.assertIn("未匹配到产品标签中的标准产品名称", HTML)
+        self.assertIn("'fof','code','file'", HTML)
 
     def test_local_knowledge_base_page_and_commands(self):
         self.assertIn("knowledge:'知识库'", HTML)
