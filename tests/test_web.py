@@ -23,7 +23,7 @@ class ShareServerTest(unittest.TestCase):
         runtime = os.path.join(self.tempdir.name, ".runtime")
         os.makedirs(runtime)
         with open(os.path.join(runtime, "page-data.json"), "w", encoding="utf-8") as output:
-            output.write('{"products":[]}')
+            output.write('{"products":[],"benchmarks":{"indices":{"000852":{"points":[]}}}}')
         with open(os.path.join(runtime, "app.js"), "w", encoding="utf-8") as output:
             output.write("window.loaded=true")
         modules = os.path.join(runtime, "modules")
@@ -32,6 +32,8 @@ class ShareServerTest(unittest.TestCase):
             output.write('{"status":"ok"}')
         with open(os.path.join(modules, "strategy-lab.json"), "w", encoding="utf-8") as output:
             output.write('{"schema_version":1,"research_only":true}')
+        with open(os.path.join(modules, "bottom-returns.json"), "w", encoding="utf-8") as output:
+            output.write('{"products":[{"product_id":"P001","product":"底层A"}]}')
         sources = os.path.join(self.tempdir.name, "data_sources")
         os.makedirs(sources)
         with open(os.path.join(sources, "product_labels.json"), "w", encoding="utf-8") as output:
@@ -83,7 +85,7 @@ class ShareServerTest(unittest.TestCase):
                                              extra_headers={"Accept-Encoding": "gzip"})
         self.assertEqual(status, 200)
         self.assertEqual(headers["Content-Encoding"], "gzip")
-        self.assertEqual(gzip.decompress(body), b'{"products":[]}')
+        self.assertIn(b'"products":[]', gzip.decompress(body))
         self.assertIn("ETag", headers)
         status, _, body = self.request(token, path="/api/page-data",
                                        extra_headers={"If-None-Match": headers["ETag"]})
@@ -97,6 +99,32 @@ class ShareServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(json.loads(body.decode("utf-8"))["research_only"])
         self.assertEqual(self.request(token, path="/api/modules/not-allowed")[0], 404)
+
+    def test_bottom_return_endpoint_is_protected_validated_and_cached(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        path = "/api/bottom-returns/P001?start=2026-01-01&end=2026-02-01&benchmark=000852"
+        self.assertEqual(self.request(path=path)[0], 401)
+        payload = {"status": "ok", "product": {"product_id": "P001"}, "holdings": []}
+        with patch("valuation_app.web.analyze_bottom_return", return_value=payload) as analyze:
+            status, headers, body = self.request(
+                token, path=path, extra_headers={"Accept-Encoding": "gzip"})
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(gzip.decompress(body).decode("utf-8")), payload)
+            self.assertIn("ETag", headers)
+            self.assertEqual(headers["Cache-Control"], "private, max-age=0, must-revalidate")
+            status, _, body = self.request(
+                token, path=path, extra_headers={"If-None-Match": headers["ETag"]})
+            self.assertEqual(status, 304)
+            self.assertEqual(body, b"")
+            self.assertEqual(analyze.call_args[0][2], "P001")
+        with patch("valuation_app.web.analyze_bottom_return",
+                   side_effect=ValueError("基准指数不在固定白名单")):
+            self.assertEqual(self.request(
+                token, path=path.replace("000852", "000001"))[0], 400)
+        self.assertEqual(self.request(token, path=path + "&security=600000")[0], 400)
+        self.assertEqual(self.request(token, path=path.replace("2026-01-01", "bad-date"))[0], 400)
+        self.assertEqual(self.request(token, path=path.replace("P001", "UNKNOWN"))[0], 404)
+        self.assertEqual(self.request(token, path="/api/bottom-returns/../secret")[0], 404)
 
     def test_valuation_archive_download_is_authenticated(self):
         self.assertEqual(self.request(path="/api/valuation-archive?date=2026-09-02")[0], 401)

@@ -104,7 +104,8 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("function initInvestmentDashboard", HTML)
         self.assertIn("创新金融业务总部FOF投资驾驶舱", HTML)
         self.assertIn("投资总览", HTML)
-        self.assertIn("收益分析", HTML)
+        self.assertIn("returns:'顶层收益'", HTML)
+        self.assertIn("'bottom-returns':'底层收益'", HTML)
         self.assertIn("市场与基准", HTML)
         self.assertIn("年化波动率", HTML)
         self.assertIn("市场研究与指数ETF配置看板", HTML)
@@ -142,13 +143,13 @@ class StaticCalculationTest(unittest.TestCase):
 
     def test_underlying_asset_analysis_is_rendered(self):
         self.assertIn("function openUnderlyingAssets()", HTML)
-        self.assertIn("底层分析", HTML)
+        self.assertIn("underlying:'组合多空'", HTML)
         self.assertIn("RAW.underlying_assets", HTML)
         self.assertIn("function renderUnderlyingDate", HTML)
         self.assertIn("const group=underlyingFofKey(a).localeCompare", HTML)
         self.assertIn("const row=document.querySelector('.top-info')", HTML)
         self.assertIn("risk.textContent='风控页面'", HTML)
-        self.assertIn("underlying.textContent='底层分析'", HTML)
+        self.assertIn("underlying.textContent='组合多空'", HTML)
         self.assertIn("网页更新时间：", HTML)
         self.assertIn("'000852','000905','000300','932000'", HTML)
         self.assertNotIn("'868008','NH0100','IXIC'", HTML)
@@ -171,6 +172,21 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("id=underlyingSelectNoneButton", HTML)
         self.assertIn("仅合计勾选项", HTML)
         self.assertIn("renderUnderlyingDate(win,date,false)", HTML)
+
+    def test_bottom_returns_navigation_search_scope_benchmark_and_paging(self):
+        self.assertIn("'bottom-returns':['bottom-returns']", HTML)
+        self.assertIn("function renderBottomReturns()", HTML)
+        self.assertIn("placeholder=\"搜索底层产品名称\"", HTML)
+        self.assertIn("function bottomProductAllowed(product)", HTML)
+        self.assertIn("(product.fof_products||[]).some(name=>dashAllowed(name))", HTML)
+        self.assertIn("/api/bottom-returns/", HTML)
+        self.assertIn("BOTTOM_BENCHMARKS", HTML)
+        self.assertIn("bottomReturnState.pageSize", HTML)
+        self.assertIn("金额收益、申赎、分红和XIRR", HTML)
+        self.assertIn("data-page=risk", HTML)
+        main = HTML[HTML.index("main=['overview','core'"):]
+        self.assertLess(main.index("'returns'"), main.index("'bottom-returns'"))
+        self.assertNotIn("'risk'", main.split("]", 1)[0])
 
     def test_project_guidance_sections_are_rendered(self):
         self.assertIn("<summary>代码指令</summary>", HTML)

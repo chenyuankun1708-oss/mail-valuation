@@ -4,6 +4,8 @@ import hashlib
 import hmac
 import json
 import os
+import re
+import sqlite3
 import tempfile
 import threading
 import time
@@ -14,6 +16,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from .mail import load_env
 from .labels import LabelConflictError, build_label_payload, mutate_catalog
+from .bottom_returns import analyze_bottom_return
 
 
 class AuthLimiter:
@@ -138,6 +141,7 @@ def make_handler(index_path, user, password, limiter=None):
         "ledger-tables": "ledger-tables.json",
         "label-workbooks": "label-workbooks.json",
         "portfolio-var": "portfolio-var.json",
+        "bottom-returns": "bottom-returns.json",
     }
     expected = "Basic " + base64.b64encode((user + ":" + password).encode("utf-8")).decode("ascii")
 
@@ -267,7 +271,8 @@ def make_handler(index_path, user, password, limiter=None):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD":
+                self.wfile.write(body)
 
         def _serve_valuation_archive(self):
             if not self._authenticate():
@@ -303,7 +308,73 @@ def make_handler(index_path, user, password, limiter=None):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        def _send_cached_json(self, payload, include_body=True):
+            raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            etag = '"%s"' % hashlib.sha256(raw).hexdigest()
+            cache_control = "private, max-age=0, must-revalidate"
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", cache_control)
+                self.end_headers()
+                return
+            use_gzip = "gzip" in self.headers.get("Accept-Encoding", "").lower()
+            body = gzip.compress(raw, compresslevel=6) if use_gzip else raw
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", cache_control)
+            self.send_header("ETag", etag)
+            self.send_header("Vary", "Accept-Encoding")
+            if use_gzip:
+                self.send_header("Content-Encoding", "gzip")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            if include_body:
+                self.wfile.write(body)
+
+        def _serve_bottom_return(self, product_id, include_body=True):
+            if not self._authenticate():
+                return
+            if not product_id or not re.match(r"^[A-Za-z0-9_-]+$", product_id):
+                self.send_error(404)
+                return
+            parsed = urlsplit(self.path)
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            if set(query) - {"start", "end", "benchmark"} or any(
+                    len(values) != 1 for values in query.values()):
+                self._send_json(400, {"error": "底层收益只接受固定的起止日和基准参数"})
+                return
+            start = query.get("start", [""])[0]
+            end = query.get("end", [""])[0]
+            benchmark = query.get("benchmark", ["000852"])[0]
+            root = os.path.dirname(index_path)
+            try:
+                with open(os.path.join(root, ".runtime", "modules", "bottom-returns.json"),
+                          "r", encoding="utf-8") as handle:
+                    manifest = json.load(handle)
+                with open(os.path.join(root, ".runtime", "page-data.json"),
+                          "r", encoding="utf-8") as handle:
+                    page = json.load(handle)
+                index = (page.get("benchmarks", {}).get("indices", {}).get(benchmark) or {})
+                result = analyze_bottom_return(
+                    os.path.join(root, "market_data", "bottom_returns.sqlite3"),
+                    manifest, product_id, start, end, benchmark, index.get("points") or [])
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+                return
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            except (OSError, sqlite3.Error) as exc:
+                self._send_json(503, {"error": "底层收益缓存暂不可用：%s" % exc})
+                return
+            self._send_cached_json(result, include_body)
 
         def _read_json(self, max_length=1024 * 1024):
             try:
@@ -569,6 +640,12 @@ def make_handler(index_path, user, password, limiter=None):
                 self._serve_asset(os.path.join(root, ".runtime", "page-data.json"),
                                   "application/json; charset=utf-8",
                                   "private, max-age=0, must-revalidate")
+            elif route.startswith("/api/bottom-returns/"):
+                product_id = route[len("/api/bottom-returns/"):]
+                if "/" in product_id:
+                    self.send_error(404)
+                else:
+                    self._serve_bottom_return(product_id)
             elif route.startswith("/api/modules/") and route[len("/api/modules/"):] in module_files:
                 filename = module_files[route[len("/api/modules/"):]]
                 self._serve_asset(os.path.join(root, ".runtime", "modules", filename),
@@ -634,6 +711,12 @@ def make_handler(index_path, user, password, limiter=None):
                 self._serve_asset(os.path.join(root, ".runtime", "page-data.json"),
                                   "application/json; charset=utf-8",
                                   "private, max-age=0, must-revalidate", False)
+            elif route.startswith("/api/bottom-returns/"):
+                product_id = route[len("/api/bottom-returns/"):]
+                if "/" in product_id:
+                    self.send_error(404)
+                else:
+                    self._serve_bottom_return(product_id, False)
             elif route.startswith("/api/modules/") and route[len("/api/modules/"):] in module_files:
                 filename = module_files[route[len("/api/modules/"):]]
                 self._serve_asset(os.path.join(root, ".runtime", "modules", filename),
