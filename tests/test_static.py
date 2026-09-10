@@ -266,6 +266,13 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("未匹配到产品标签中的标准产品名称", HTML)
         self.assertIn("'fof','code','file'", HTML)
 
+    def test_global_strategy_lists_filtered_underlying_positions(self):
+        self.assertIn("function globalHoldingList(items)", HTML)
+        self.assertIn("底层产品（名称索引）", HTML)
+        self.assertIn("科目代码（追溯）", HTML)
+        self.assertIn("产品按标准产品名称索引", HTML)
+        self.assertIn("index===0?globalHoldingList(items):''", HTML)
+
     def test_local_knowledge_base_page_and_commands(self):
         self.assertIn("knowledge:'知识库'", HTML)
         self.assertIn("function renderKnowledge()", HTML)
