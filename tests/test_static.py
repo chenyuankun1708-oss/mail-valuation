@@ -145,7 +145,7 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("底层分析", HTML)
         self.assertIn("RAW.underlying_assets", HTML)
         self.assertIn("function renderUnderlyingDate", HTML)
-        self.assertIn("排序：关联FOF → 敞口比例降序", HTML)
+        self.assertIn("const group=underlyingFofKey(a).localeCompare", HTML)
         self.assertIn("const row=document.querySelector('.top-info')", HTML)
         self.assertIn("risk.textContent='风控页面'", HTML)
         self.assertIn("underlying.textContent='底层分析'", HTML)
@@ -161,6 +161,16 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("<summary>计算口径</summary>", HTML)
         self.assertIn("所有产品期末资产：", HTML)
         self.assertIn("区间收益：", HTML)
+
+    def test_underlying_asset_selection_recalculates_totals(self):
+        self.assertIn("function underlyingItemKey(x)", HTML)
+        self.assertIn("function underlyingTotals(items)", HTML)
+        self.assertIn("class=underlying-check", HTML)
+        self.assertIn("id=underlyingSelectAll", HTML)
+        self.assertIn("id=underlyingSelectAllButton", HTML)
+        self.assertIn("id=underlyingSelectNoneButton", HTML)
+        self.assertIn("仅合计勾选项", HTML)
+        self.assertIn("renderUnderlyingDate(win,date,false)", HTML)
 
     def test_project_guidance_sections_are_rendered(self):
         self.assertIn("<summary>代码指令</summary>", HTML)
