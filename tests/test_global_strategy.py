@@ -33,6 +33,27 @@ console.log(JSON.stringify(globalStrategySummary()));
         self.assertEqual([row["rate"] for row in result["items"][0]["holdings"]], [8, -2])
         self.assertAlmostEqual(result["items"][0]["absolute_return"], (100 * 8 + 200 * -2) / 300)
 
+    def test_department_filter_recalculates_metrics_from_selected_holdings(self):
+        source = """
+const report=%s;
+function holdingLabel(h){return {primary:h.tag,secondary:h.secondary,vehicle:h.vehicle,department:h.department}}
+function holdingMetric(p,h){return {period:h.rate,label:holdingLabel(h)}}
+%s
+console.log(JSON.stringify(globalStrategySummary({department:'华东营业部'})));
+""" % (json.dumps([
+            {"status": "ok", "name": "FOF甲", "holdings": [
+                {"name": "底仓甲", "tag": "CTA", "secondary": "全品种", "vehicle": "集合",
+                 "department": "华东营业部", "market_value": 100, "period_profit": 8, "rate": 6},
+                {"name": "底仓乙", "tag": "股票指增", "secondary": "中证1000", "vehicle": "专户",
+                 "department": "华南营业部", "market_value": 900, "period_profit": 90, "rate": 10}]},
+        ], ensure_ascii=False), helper())
+        result = json.loads(subprocess.check_output(["node", "-e", source]).decode("utf-8"))
+        self.assertEqual(result["products"], 1)
+        self.assertEqual(result["holdings"], 1)
+        self.assertEqual(result["items"][0]["market"], 100)
+        self.assertEqual(result["items"][0]["profit"], 8)
+        self.assertEqual(result["items"][0]["absolute_return"], 6)
+
 
 if __name__ == "__main__":
     unittest.main()

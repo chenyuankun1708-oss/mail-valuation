@@ -246,6 +246,14 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("async function labelApi", HTML)
         self.assertIn("refreshLabelDependentViews(catalog)", HTML)
         self.assertIn("renderDashStrategy()", HTML)
+        self.assertIn("department:'无'", HTML)
+        self.assertIn("只接受人工在线填写", HTML)
+
+    def test_strategy_filters_recalculate_from_label_selection(self):
+        self.assertIn("globalStrategySummary(globalStrategyFilters)", HTML)
+        self.assertIn("globalStrategyFilterSelect('department','营业部')", HTML)
+        self.assertIn("占筛选结果市值", HTML)
+        self.assertIn("筛选后的同一持仓集合重算", HTML)
         self.assertIn("data-action=disable", HTML)
 
     def test_local_knowledge_base_page_and_commands(self):

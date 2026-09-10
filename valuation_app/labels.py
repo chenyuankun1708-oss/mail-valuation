@@ -92,14 +92,16 @@ def _manager_key(value):
     return normalize_name(value).replace("投资管理", "").replace("资产管理", "").replace("投资", "")
 
 
-def _record(manager, product, primary, secondary, vehicle, source, sheet, row, evidence=None):
+def _record(manager, product, primary, secondary, vehicle, source, sheet, row, evidence=None,
+            department=None):
     primary = str(primary or "").strip() or "其他"
     if primary == "多策略":
         secondary = str(secondary or "").strip() or "多策略"
     return {"manager": str(manager or "").strip(), "product": str(product or "").strip(),
             "primary": primary, "raw_primary": primary,
             "secondary": str(secondary or "").strip() or "其他",
-            "vehicle": str(vehicle or "").strip() or "其他", "source": source,
+            "vehicle": str(vehicle or "").strip() or "其他",
+            "department": str(department or "").strip() or "无", "source": source,
             "sheet": sheet, "row": row, "normalized": normalize_name(product),
             "classification_evidence": str(evidence or "").strip()}
 
@@ -163,6 +165,7 @@ def migrate_catalog(product_labels_path, manager_list_path, json_path, now=None)
     migrated = []
     for record in records:
         item = dict(record)
+        item["department"] = str(item.get("department") or "").strip() or "无"
         item["product_id"] = _stable_id("product", item.get("normalized"))
         item["record_id"] = _stable_id(
             "label", item.get("normalized"), item.get("source"), item.get("sheet"), item.get("row")
@@ -202,11 +205,12 @@ def load_json_catalog(json_path):
         item = dict(source)
         item["classification_evidence"] = item.get("classification_basis", "")
         item["normalized"] = item.get("normalized") or normalize_name(item.get("product"))
+        item["department"] = str(item.get("department") or "").strip() or "无"
         records.append(item)
     return records, payload
 
 
-EDITABLE_FIELDS = ("product", "manager", "primary", "secondary", "vehicle",
+EDITABLE_FIELDS = ("product", "manager", "primary", "secondary", "vehicle", "department",
                    "classification_basis", "active")
 
 
@@ -239,6 +243,8 @@ def _validated_changes(values, creating=False):
     for key in ("primary", "secondary", "vehicle"):
         if key in result and not result[key]:
             result[key] = "其他"
+    if "department" in result and not result["department"]:
+        result["department"] = "无"
     return result
 
 
@@ -266,7 +272,7 @@ def mutate_catalog(json_path, action, values, expected_revision, username,
                 "raw_primary": changes.get("primary", "其他"), "version": 1,
                 "updated_at": timestamp, "active": True}
         item.update({"manager": "", "product": "", "primary": "其他", "secondary": "其他",
-                     "vehicle": "其他", "classification_basis": ""})
+                     "vehicle": "其他", "department": "无", "classification_basis": ""})
         item.update(changes)
         records.append(item)
     elif action in ("update", "deactivate"):
@@ -312,12 +318,13 @@ def mutate_catalog(json_path, action, values, expected_revision, username,
 
 def catalog_workbook(records):
     headers = ["产品稳定标识", "记录标识", "产品名称", "管理人", "一级标签", "二级标签",
-               "投资形式", "分类依据", "启用", "版本", "更新时间", "原始来源"]
+               "投资形式", "营业部", "分类依据", "启用", "版本", "更新时间", "原始来源"]
     rows = [headers]
     for item in records:
         rows.append([item.get("product_id"), item.get("record_id"), item.get("product"),
                      item.get("manager"), item.get("primary"), item.get("secondary"),
-                     item.get("vehicle"), item.get("classification_basis"), item.get("active", True),
+                     item.get("vehicle"), item.get("department") or "无", item.get("classification_basis"),
+                     item.get("active", True),
                      item.get("version"), item.get("updated_at"), item.get("source")])
     return {"线上标签JSON": {"有效标签": rows}}
 
@@ -365,7 +372,8 @@ def match_label(name, records):
                     manager_record.get("classification_evidence"),
                     supplement.get("classification_evidence"))))
             candidates = [manager_record]
-    signatures = {(item["primary"], item["secondary"], item["vehicle"]) for item in candidates}
+    signatures = {(item["primary"], item["secondary"], item["vehicle"],
+                   item.get("department") or "无") for item in candidates}
     if len(signatures) == 1:
         record = candidates[0]
         result = dict(record, match_status="已匹配", match_method=method,
@@ -375,7 +383,7 @@ def match_label(name, records):
         return result
     status = "歧义" if candidates else "其他"
     return {"manager": "", "product": name, "primary": "其他", "raw_primary": "其他", "secondary": "其他",
-            "vehicle": "其他", "source": "", "sheet": "", "row": None,
+            "vehicle": "其他", "department": "无", "source": "", "sheet": "", "row": None,
             "normalized": target, "match_status": status, "match_method": "未自动匹配",
             "confidence": "低", "candidate_count": len(candidates),
             "classification_basis": "未匹配或存在歧义，归入其他", "classification_evidence": ""}

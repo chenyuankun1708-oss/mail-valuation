@@ -126,15 +126,19 @@ class ShareServerTest(unittest.TestCase):
         created = json.loads(body.decode("utf-8"))
         record_id = created["record"]["record_id"]
         self.assertEqual(created["revision"], 2)
+        self.assertEqual(created["record"]["department"], "无")
         self.assertEqual(self.request(token, path="/api/labels", method="POST", body=create,
                                       extra_headers={"Content-Type": "application/json"})[0], 409)
         update = json.dumps({"expected_revision": 2,
-                             "values": {"secondary": "管理期货"}}, ensure_ascii=False).encode("utf-8")
+                             "values": {"secondary": "管理期货", "department": "华东营业部"}},
+                            ensure_ascii=False).encode("utf-8")
         status, _, body = self.request(token, path="/api/labels/" + record_id,
                                        method="PATCH", body=update,
                                        extra_headers={"Content-Type": "application/json"})
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body.decode("utf-8"))["record"]["version"], 2)
+        updated = json.loads(body.decode("utf-8"))["record"]
+        self.assertEqual(updated["version"], 2)
+        self.assertEqual(updated["department"], "华东营业部")
         deactivate = json.dumps({"expected_revision": 3}).encode("utf-8")
         self.assertEqual(self.request(token, path="/api/labels/" + record_id,
                                       method="DELETE", body=deactivate,

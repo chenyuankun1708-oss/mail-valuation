@@ -6,7 +6,7 @@ import zipfile
 from unittest import mock
 
 from valuation_app.labels import (build_label_payload, load_json_catalog, match_label,
-                                  migrate_catalog, normalize_name, read_workbook)
+                                  migrate_catalog, mutate_catalog, normalize_name, read_workbook)
 
 
 class LabelTest(unittest.TestCase):
@@ -73,6 +73,7 @@ class LabelTest(unittest.TestCase):
                 payload = migrate_catalog("产品标签.xlsx", "管理人清单.xlsx", path)
             self.assertEqual(payload["schema_version"], 1)
             self.assertEqual(payload["revision"], 1)
+            self.assertEqual(payload["records"][0]["department"], "无")
             self.assertTrue(payload["records"][0]["product_id"].startswith("product_"))
             self.assertEqual(payload["records"][0]["version"], 1)
             loaded, raw = load_json_catalog(path)
@@ -91,6 +92,23 @@ class LabelTest(unittest.TestCase):
             records, _payload = load_json_catalog(path)
             self.assertEqual(records, [])
             self.assertEqual(build_label_payload(["测试产品"], path)["matches"]["测试产品"]["primary"], "其他")
+
+    def test_department_defaults_to_wu_and_is_only_changed_online(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "product_labels.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump({"schema_version": 1, "revision": 1, "updated_at": "2026-09-10",
+                           "records": [{"record_id": "label_1", "product": "测试产品足够长",
+                                        "normalized": normalize_name("测试产品足够长"),
+                                        "primary": "CTA", "raw_primary": "CTA",
+                                        "secondary": "全品种", "vehicle": "集合",
+                                        "manager": "甲", "source": "网页标签", "active": True}]}, handle)
+            records, _payload = load_json_catalog(path)
+            self.assertEqual(records[0]["department"], "无")
+            payload, item = mutate_catalog(path, "update", {"department": "华东营业部"}, 1,
+                                           "tester", record_id="label_1")
+            self.assertEqual(item["department"], "华东营业部")
+            self.assertEqual(payload["revision"], 2)
 
 
 if __name__ == "__main__":

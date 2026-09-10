@@ -369,6 +369,8 @@ def make_handler(index_path, user, password, limiter=None):
             try:
                 with open(self._labels_path(), "r", encoding="utf-8") as handle:
                     payload = json.load(handle)
+                for record in payload.get("records", []):
+                    record["department"] = str(record.get("department") or "").strip() or "无"
                 page_path = os.path.join(os.path.dirname(index_path), ".runtime", "page-data.json")
                 with open(page_path, "r", encoding="utf-8") as handle:
                     page = json.load(handle)
