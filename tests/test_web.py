@@ -115,7 +115,10 @@ class ShareServerTest(unittest.TestCase):
         self.assertEqual(self.request(path="/api/labels")[0], 401)
         status, _, body = self.request(token, path="/api/labels")
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(body.decode("utf-8"))["revision"], 1)
+        catalog = json.loads(body.decode("utf-8"))
+        self.assertEqual(catalog["revision"], 1)
+        self.assertEqual(catalog["deduped_records"], [])
+        self.assertEqual(catalog["dedupe_check"]["duplicate_groups"], 0)
         create = json.dumps({"expected_revision": 1, "values": {
             "product": "测试产品", "manager": "测试管理人", "primary": "CTA",
             "secondary": "全品种", "vehicle": "专户", "classification_basis": "人工确认"

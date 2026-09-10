@@ -5,7 +5,8 @@ import unittest
 import zipfile
 from unittest import mock
 
-from valuation_app.labels import (build_label_payload, load_json_catalog, match_label,
+from valuation_app.labels import (build_label_payload, deduplicate_label_records,
+                                  ensure_catalog_products, load_json_catalog, match_label,
                                   migrate_catalog, mutate_catalog, normalize_name, read_workbook)
 
 
@@ -109,6 +110,64 @@ class LabelTest(unittest.TestCase):
                                            "tester", record_id="label_1")
             self.assertEqual(item["department"], "华东营业部")
             self.assertEqual(payload["revision"], 2)
+
+    def test_product_name_dedupe_merges_complementary_fields(self):
+        base = {"product": "华年元享1号私募证券投资基金", "normalized": "华年元享1号",
+                "manager": "华年", "primary": "股票指增", "secondary": "量化选股",
+                "vehicle": "专户", "department": "无", "classification_basis": "人工维护",
+                "source": "管理人清单", "record_id": "label_old", "active": True}
+        department = dict(base, manager="", primary="其他", secondary="其他",
+                          department="上海虹桥路", source="网页标签",
+                          record_id="label_department")
+        records, check = deduplicate_label_records([base, department])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["department"], "上海虹桥路")
+        self.assertEqual(records[0]["primary"], "股票指增")
+        self.assertEqual(check["duplicate_groups"], 1)
+        self.assertEqual(check["duplicates"][0]["record_ids"],
+                         ["label_old", "label_department"])
+
+    def test_missing_end_holding_is_auto_added_once_with_neutral_defaults(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "product_labels.json")
+            audit_path = os.path.join(folder, "logs", "label-audit.jsonl")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump({"schema_version": 1, "revision": 4, "updated_at": "2026-09-10",
+                           "records": []}, handle)
+            result = build_label_payload(
+                ["待补录产品私募证券投资基金"], path,
+                auto_add_names=["待补录产品私募证券投资基金", "待补录产品"],
+                audit_path=audit_path)
+            self.assertEqual(result["revision"], 5)
+            self.assertEqual(result["record_count"], 1)
+            self.assertEqual(result["auto_added_products"], ["待补录产品私募证券投资基金"])
+            record = result["deduped_records"][0]
+            self.assertEqual((record["manager"], record["primary"], record["secondary"],
+                              record["vehicle"], record["department"]),
+                             ("", "其他", "其他", "其他", "无"))
+            self.assertEqual(result["matches"]["待补录产品私募证券投资基金"]["match_status"],
+                             "已匹配")
+            second = build_label_payload([], path, auto_add_names=["待补录产品"])
+            self.assertEqual(second["revision"], 5)
+            self.assertTrue(os.path.exists(audit_path))
+
+    def test_create_and_rename_reject_duplicate_normalized_product_name(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "product_labels.json")
+            records = [{"record_id": "label_1", "product": "已有产品私募证券投资基金",
+                        "normalized": normalize_name("已有产品私募证券投资基金"),
+                        "active": True, "version": 1},
+                       {"record_id": "label_2", "product": "另一产品",
+                        "normalized": normalize_name("另一产品"),
+                        "active": True, "version": 1}]
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump({"schema_version": 1, "revision": 1,
+                           "updated_at": "2026-09-10", "records": records}, handle)
+            with self.assertRaises(ValueError):
+                mutate_catalog(path, "create", {"product": "已有产品"}, 1, "tester")
+            with self.assertRaises(ValueError):
+                mutate_catalog(path, "update", {"product": "已有产品"}, 1, "tester",
+                               record_id="label_2")
 
 
 if __name__ == "__main__":

@@ -377,8 +377,10 @@ def make_handler(index_path, user, password, limiter=None):
                 holding_names = [holding.get("name") for product in page.get("products", [])
                                  for point in product.get("points", [])
                                  for holding in point.get("holdings", []) if holding.get("name")]
-                payload["matches"] = build_label_payload(
-                    holding_names, self._labels_path()).get("matches", {})
+                label_runtime = build_label_payload(holding_names, self._labels_path())
+                payload["matches"] = label_runtime.get("matches", {})
+                payload["deduped_records"] = label_runtime.get("deduped_records", [])
+                payload["dedupe_check"] = label_runtime.get("dedupe_check", {})
             except OSError:
                 self._send_json(503, {"error": "标签JSON不存在，请先执行labels-migrate"})
                 return

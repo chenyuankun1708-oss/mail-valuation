@@ -210,6 +210,139 @@ def load_json_catalog(json_path):
     return records, payload
 
 
+_LABEL_DEFAULTS = {"manager": "", "primary": "其他", "secondary": "其他",
+                   "vehicle": "其他", "department": "无",
+                   "classification_basis": "", "classification_evidence": ""}
+
+
+def deduplicate_label_records(records):
+    """Return one effective active record per normalized product name and an audit check."""
+    groups = OrderedDict()
+    for position, source in enumerate(records):
+        item = dict(source)
+        item["normalized"] = item.get("normalized") or normalize_name(item.get("product"))
+        item["department"] = str(item.get("department") or "").strip() or "无"
+        item["classification_evidence"] = item.get(
+            "classification_evidence", item.get("classification_basis", ""))
+        key = item["normalized"] or "__blank_%s" % position
+        groups.setdefault(key, []).append((position, item))
+
+    effective = []
+    duplicates = []
+    merge_fields = ("manager", "primary", "secondary", "vehicle", "department",
+                    "classification_basis", "classification_evidence")
+    for normalized, members in groups.items():
+        def score(pair):
+            position, item = pair
+            meaningful = sum(1 for field in merge_fields
+                             if str(item.get(field) or "").strip() not in
+                             ("", _LABEL_DEFAULTS.get(field, "")))
+            manager_source = 1 if item.get("source") == "管理人清单" else 0
+            return meaningful, manager_source, -position
+
+        _position, canonical_source = max(members, key=score)
+        canonical = dict(canonical_source)
+        conflicts = []
+        for field in merge_fields:
+            default = _LABEL_DEFAULTS.get(field, "")
+            meaningful_values = []
+            for _member_position, item in members:
+                value = str(item.get(field) or "").strip()
+                if value and value != default and value not in meaningful_values:
+                    meaningful_values.append(value)
+            if len(meaningful_values) == 1:
+                canonical[field] = meaningful_values[0]
+            elif len(meaningful_values) > 1:
+                conflicts.append({"field": field, "values": meaningful_values})
+        if canonical.get("primary"):
+            canonical["raw_primary"] = canonical.get("raw_primary") or canonical["primary"]
+        record_ids = [item.get("record_id") for _member_position, item in members
+                      if item.get("record_id")]
+        canonical["duplicate_record_ids"] = record_ids
+        effective.append(canonical)
+        if len(members) > 1:
+            duplicates.append({
+                "normalized_name": normalized,
+                "product_name": canonical.get("product") or normalized,
+                "record_count": len(members),
+                "record_ids": record_ids,
+                "canonical_record_id": canonical.get("record_id"),
+                "conflicts": conflicts,
+            })
+    check = {"checked_records": len(records), "unique_product_names": len(effective),
+             "duplicate_groups": len(duplicates), "duplicates": duplicates}
+    return effective, check
+
+
+def ensure_catalog_products(json_path, holding_names, audit_path=None, now=None):
+    """Add previously unseen end-position names with neutral labels, once per normalized name."""
+    with open(json_path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if payload.get("schema_version") != LABEL_SCHEMA_VERSION:
+        raise ValueError("不支持的标签JSON版本")
+    records = payload.setdefault("records", [])
+    known = {normalize_name(item.get("product")) for item in records
+             if normalize_name(item.get("product"))}
+    additions = []
+    timestamp = (now or datetime.now()).replace(microsecond=0).isoformat()
+    for name in holding_names:
+        product = str(name or "").strip()
+        normalized = normalize_name(product)
+        if not normalized or normalized in known:
+            continue
+        item = {
+            "product_id": _stable_id("product", normalized),
+            "record_id": "label_%s" % uuid.uuid4().hex[:16],
+            "normalized": normalized,
+            "manager": "",
+            "product": product,
+            "primary": "其他",
+            "raw_primary": "其他",
+            "secondary": "其他",
+            "vehicle": "其他",
+            "department": "无",
+            "classification_basis": "期末底层持仓自动补录，待人工维护",
+            "source": "估值表自动补录",
+            "sheet": "",
+            "row": None,
+            "active": True,
+            "version": 1,
+            "updated_at": timestamp,
+        }
+        records.append(item)
+        additions.append(item)
+        known.add(normalized)
+    if not additions:
+        return payload, []
+
+    current_revision = int(payload.get("revision", 0))
+    payload["revision"] = current_revision + 1
+    payload["updated_at"] = timestamp
+    backup_dir = os.path.join(os.path.dirname(json_path), "label_backups")
+    if not os.path.isdir(backup_dir):
+        os.makedirs(backup_dir)
+    shutil.copy2(json_path, os.path.join(
+        backup_dir, "product_labels.r%s.json" % current_revision))
+    temporary = json_path + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    os.replace(temporary, json_path)
+    if audit_path:
+        audit_folder = os.path.dirname(os.path.abspath(audit_path))
+        if not os.path.isdir(audit_folder):
+            os.makedirs(audit_folder)
+        audit = {"timestamp": timestamp, "user": "system:auto-label-sync",
+                 "action": "auto_create_missing_end_holdings",
+                 "products": [item["product"] for item in additions],
+                 "record_ids": [item["record_id"] for item in additions],
+                 "revision_before": current_revision,
+                 "revision_after": payload["revision"]}
+        with open(audit_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(audit, ensure_ascii=False) + "\n")
+    return payload, additions
+
+
 EDITABLE_FIELDS = ("product", "manager", "primary", "secondary", "vehicle", "department",
                    "classification_basis", "active")
 
@@ -266,6 +399,8 @@ def mutate_catalog(json_path, action, values, expected_revision, username,
     if action == "create":
         changes = _validated_changes(values, creating=True)
         normalized = normalize_name(changes["product"])
+        if any(normalize_name(row.get("product")) == normalized for row in records):
+            raise ValueError("产品名称已存在，请编辑或重新启用原记录")
         item = {"product_id": _stable_id("product", normalized),
                 "record_id": "label_%s" % uuid.uuid4().hex[:16],
                 "normalized": normalized, "source": "网页标签", "sheet": "", "row": None,
@@ -281,6 +416,11 @@ def mutate_catalog(json_path, action, values, expected_revision, username,
             raise KeyError("标签记录不存在")
         before = dict(item)
         changes = {"active": False} if action == "deactivate" else _validated_changes(values)
+        if "product" in changes:
+            changed_normalized = normalize_name(changes["product"])
+            if any(row is not item and normalize_name(row.get("product")) == changed_normalized
+                   for row in records):
+                raise ValueError("产品名称已存在，请编辑或重新启用原记录")
         item.update(changes)
         if "product" in changes:
             item["normalized"] = normalize_name(item["product"])
@@ -389,14 +529,24 @@ def match_label(name, records):
             "classification_basis": "未匹配或存在歧义，归入其他", "classification_evidence": ""}
 
 
-def build_label_payload(holding_names, json_path):
+def build_label_payload(holding_names, json_path, auto_add_names=None, audit_path=None):
     errors = []
     try:
+        additions = []
+        if auto_add_names is not None:
+            _catalog, additions = ensure_catalog_products(
+                json_path, auto_add_names, audit_path=audit_path)
         records, catalog = load_json_catalog(json_path)
     except Exception as exc:
-        records, catalog = [], {"records": [], "revision": None, "updated_at": None}
+        records, catalog, additions = [], {"records": [], "revision": None, "updated_at": None}, []
         errors.append({"source": "线上标签JSON", "error": "标签JSON读取失败（%s）" % type(exc).__name__})
-    matches = OrderedDict((name, match_label(name, records)) for name in sorted(set(holding_names)))
-    return {"matches": matches, "errors": errors, "workbooks": catalog_workbook(catalog.get("records", [])),
-            "record_count": len(records), "revision": catalog.get("revision"),
-            "updated_at": catalog.get("updated_at")}
+    effective_records, dedupe_check = deduplicate_label_records(records)
+    matches = OrderedDict((name, match_label(name, effective_records))
+                          for name in sorted(set(holding_names)))
+    return {"matches": matches, "errors": errors,
+            "workbooks": catalog_workbook(effective_records),
+            "records": catalog.get("records", []), "deduped_records": effective_records,
+            "dedupe_check": dedupe_check,
+            "auto_added_products": [item.get("product") for item in additions],
+            "record_count": len(effective_records), "raw_record_count": len(records),
+            "revision": catalog.get("revision"), "updated_at": catalog.get("updated_at")}

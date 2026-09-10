@@ -258,6 +258,9 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("renderDashStrategy()", HTML)
         self.assertIn("department:'无'", HTML)
         self.assertIn("只接受人工在线填写", HTML)
+        self.assertIn("catalog.deduped_records", HTML)
+        self.assertIn("产品标签名称除重检查", HTML)
+        self.assertIn("期末底层持仓的产品名称会自动补录", HTML)
 
     def test_strategy_filters_recalculate_from_label_selection(self):
         self.assertIn("globalStrategySummary(globalStrategyFilters)", HTML)
