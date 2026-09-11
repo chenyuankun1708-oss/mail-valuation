@@ -42,7 +42,7 @@ try {
             $Line = $_.ToString()
             Add-Content -LiteralPath $TunnelLog -Value $Line
             if ($Line -match 'https://[a-z0-9-]+\.trycloudflare\.com') {
-                Set-Content -LiteralPath $UrlFile -Value $Matches[0] -Encoding UTF8
+                Set-Content -LiteralPath $UrlFile -Value ($Matches[0] + '/#home') -Encoding UTF8
             }
         }
         $ErrorActionPreference = $PreviousErrorActionPreference

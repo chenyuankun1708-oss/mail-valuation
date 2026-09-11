@@ -125,7 +125,7 @@ python app.py download
 python app.py download --latest-only
 ```
 
-启动网页（默认会打开 `http://127.0.0.1:8000`）：
+启动网页（默认会打开欢迎首页 `http://127.0.0.1:8000/#home`）：
 
 ```powershell
 python app.py run
@@ -160,7 +160,7 @@ python app.py share
 powershell -ExecutionPolicy Bypass -File .\scripts\setup_tailscale_share.ps1
 ```
 
-完成一次Tailscale网页登录和Funnel授权后，固定地址写入 `logs/share-url.txt`。手工恢复使用：
+完成一次Tailscale网页登录和Funnel授权后，带 `#home` 的固定欢迎页地址写入 `logs/share-url.txt`。手工恢复使用：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\start_tailscale_share.ps1

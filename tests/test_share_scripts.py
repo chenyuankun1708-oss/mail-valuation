@@ -19,6 +19,7 @@ class ShareScriptTest(unittest.TestCase):
         self.assertIn("Test-LocalShare", text)
         self.assertIn("no duplicate was started", text)
         self.assertIn("share-url.txt", text)
+        self.assertIn("'/#home'", text)
         self.assertIn("status --json 2>$null | Out-String", text)
         self.assertIn("[regex]::Match", text)
         self.assertIn("tailscale-ipn.exe", text)
@@ -41,6 +42,7 @@ class ShareScriptTest(unittest.TestCase):
         text = read_script("start_share.ps1")
         self.assertIn("cloudflared", text)
         self.assertIn("tunnel --no-autoupdate", text)
+        self.assertIn("'/#home'", text)
 
 
 if __name__ == "__main__":

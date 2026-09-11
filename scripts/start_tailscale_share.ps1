@@ -97,7 +97,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-ShareLog ("Funnel failed with exit code $LASTEXITCODE. Command output was not logged because it may contain an authorization URL.")
     throw 'Tailscale Funnel failed. Initial enablement may require an Administrator PowerShell and browser approval.'
 }
-$Url = 'https://' + $DnsName
+$Url = 'https://' + $DnsName + '/#home'
 Set-Content -LiteralPath $UrlFile -Value $Url -Encoding UTF8
 Write-ShareLog ("Stable share URL: $Url")
 Write-Host 'The browser will still require SHARE_USER and SHARE_PASSWORD from .env.'

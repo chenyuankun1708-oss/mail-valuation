@@ -749,7 +749,7 @@ def serve(index_path="index.html", host="127.0.0.1", port=8000, open_browser=Tru
     if timing_callback:
         timing_callback("finish", "网页服务启动", "服务运行",
                         time.perf_counter() - started, "success")
-    url = "http://127.0.0.1:%s" % server.server_address[1]
+    url = "http://127.0.0.1:%s/#home" % server.server_address[1]
     print("受密码保护的收益看板已启动：" + url)
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
