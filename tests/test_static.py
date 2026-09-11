@@ -310,6 +310,58 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("python app.py knowledge-check", HTML)
         self.assertIn("knowledge_base/inbox", HTML)
 
+    def test_bottom_return_contribution_selects_highest_and_lowest_ten(self):
+        self.assertIn("function bottomContributionRows(holdings)", HTML)
+        self.assertIn("Number(b.estimated_profit)-Number(a.estimated_profit)", HTML)
+        self.assertIn("ranked.length<=20", HTML)
+        self.assertIn("ranked.slice(0,10).concat(ranked.slice(-10))", HTML)
+        self.assertIn("new Set", HTML)
+        self.assertIn("已省略中间${selection.omitted}项", HTML)
+        self.assertIn("c.height=Math.max(320", HTML)
+        self.assertNotIn("filter(x=>x.estimated_profit!=null).slice(0,15)", HTML)
+
+    def test_bottom_return_contribution_ranking_cases(self):
+        import json
+        import re
+        import shutil
+        import subprocess
+
+        if not shutil.which("node"):
+            self.skipTest("本机无 node，跳过贡献首尾选择行为检查")
+        match = re.search(
+            r"function bottomContributionRows\(holdings\)\{.*?\}\nfunction drawBottomContribution",
+            HTML,
+        )
+        self.assertIsNotNone(match)
+        function_source = match.group(0).rsplit("\nfunction drawBottomContribution", 1)[0]
+        script = function_source + """
+const cases = {
+  over: Array.from({length:25}, (_,i)=>({name:'P'+i,estimated_profit:i})),
+  exact: Array.from({length:20}, (_,i)=>({name:'E'+i,estimated_profit:i})),
+  mixed: [{name:'B',estimated_profit:5},{name:'A',estimated_profit:5},
+          {name:'N',estimated_profit:-2},{name:'Z',estimated_profit:0},
+          {name:'Null',estimated_profit:null},{name:'Bad',estimated_profit:'bad'}],
+  positive: Array.from({length:21}, (_,i)=>({name:'A'+i,estimated_profit:i+1}))
+};
+const output = {};
+for (const [key,value] of Object.entries(cases)) {
+  const selected = bottomContributionRows(value);
+  output[key] = {names:selected.rows.map(x=>x.name), values:selected.rows.map(x=>Number(x.estimated_profit)), omitted:selected.omitted};
+}
+process.stdout.write(JSON.stringify(output));
+"""
+        result = subprocess.run(
+            ["node", "-e", script], capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)
+        self.assertEqual(output["over"]["values"], list(range(24, 14, -1)) + list(range(9, -1, -1)))
+        self.assertEqual(output["over"]["omitted"], 5)
+        self.assertEqual(output["exact"]["values"], list(range(19, -1, -1)))
+        self.assertEqual(output["exact"]["omitted"], 0)
+        self.assertEqual(output["mixed"]["names"], ["A", "B", "Z", "N"])
+        self.assertEqual(output["positive"]["values"], list(range(21, 11, -1)) + list(range(10, 0, -1)))
+        self.assertEqual(len(output["positive"]["names"]), len(set(output["positive"]["names"])))
+
     def test_holding_change_attribution_is_estimated_and_exportable(self):
         self.assertIn("attribution:'持仓变动归因（估算）'", HTML)
         self.assertIn("function attributionInterval(fof,a,b)", HTML)
