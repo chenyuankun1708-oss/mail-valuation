@@ -253,7 +253,7 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("function promoteTopControls()", HTML)
         self.assertIn("function removeLegacyReportButton()", HTML)
         self.assertIn("#dashReport .report-button", HTML)
-        self.assertIn("initInvestmentDashboard();installKnowledgeNav();removeLegacyReportButton()", HTML)
+        self.assertIn("initInvestmentDashboard();installHomeNavigation();installKnowledgeNav();removeLegacyReportButton()", HTML)
         self.assertIn("section.style.display='none'", HTML)
         self.assertIn("function reportAllStrategyShares()", HTML)
         self.assertIn("所有策略占比", HTML)
@@ -493,6 +493,29 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("r.residual?'—':money(r.profit)", HTML)
         self.assertNotIn("groupResidualNote", HTML)
         self.assertIn("portfolioGroupRows(end)", HTML)
+
+    def test_welcome_home_navigation_and_deep_links(self):
+        self.assertIn("const DASH_PAGES={home:'首页'", HTML)
+        self.assertIn("const dashState={page:'home'", HTML)
+        self.assertIn("p[0]||'home'", HTML)
+        self.assertIn("欢迎来到FOF管理系统，想查阅什么功能？", HTML)
+        self.assertIn("aria-expanded=false", HTML)
+        self.assertIn("function toggleHomeGroup(id)", HTML)
+        self.assertIn("prefers-reduced-motion:reduce", HTML)
+        self.assertIn("返回FOF管理系统首页", HTML)
+        self.assertIn("installHomeNavigation()", HTML)
+        for label, page in (
+                ("总览", "overview"), ("FOF层", "returns"),
+                ("底层", "bottom-returns"), ("策略层", "strategy"),
+                ("标签", "labels"), ("风控系统", "risk"),
+                ("知识库", "knowledge"), ("策略实验室", "lab")):
+            self.assertIn("['%s','%s','']" % (label, page), HTML)
+        self.assertIn("['台账','data','ledger']", HTML)
+        self.assertIn("['估值表','overview','report']", HTML)
+        self.assertIn("id=dataLedgerPanel", HTML)
+        self.assertIn("inlineLedgerSearch", HTML)
+        self.assertIn("focusDashTarget(page,target)", HTML)
+        self.assertIn("#'+page+'/'+target", HTML)
 
 
 import os
