@@ -7,8 +7,8 @@ from unittest.mock import patch
 from openpyxl import Workbook
 
 from valuation_app.bottom_returns import (
-    BENCHMARK_CODES, _benchmark_metrics, _holding_summaries, _snapshots, analyze_bottom_return,
-    parse_leaf_investments, sync_bottom_return_cache,
+    BENCHMARK_CODES, _benchmark_metrics, _holding_summaries, _parent_map, _registry, _snapshots,
+    analyze_bottom_return, parse_leaf_investments, sync_bottom_return_cache,
 )
 
 
@@ -86,6 +86,56 @@ class BottomReturnTest(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertEqual(manifest["product_count"], 1)
             self.assertEqual(manifest["products"][0]["fof_products"], ["父FOF"])
+
+    def test_registry_excludes_configured_top_product_but_keeps_other_fof_name(self):
+        with tempfile.TemporaryDirectory() as root:
+            four_level = os.path.join(root, "四级估值表")
+            top = os.path.join(four_level, "SB9057")
+            bottom = os.path.join(four_level, "BOTTOM1")
+            os.makedirs(top)
+            os.makedirs(bottom)
+            with open(os.path.join(top, "2026-09-10_(SB9057)中信建投聚智多策略9号FOF单一资产管理计划_证券投资基金估值表.xls"), "wb") as output:
+                output.write(b"top")
+            with open(os.path.join(bottom, "2026-09-10_量化FOF精选一号私募证券投资基金_证券投资基金估值表.xls"), "wb") as output:
+                output.write(b"bottom")
+            products = _registry(root)
+        self.assertEqual([item["product"] for item in products], ["量化FOF精选一号私募证券投资基金"])
+
+    def test_parent_map_requires_a_holding_match_not_fof_self_name(self):
+        products = [
+            {"product_id": "TOP", "normalized": "第一创业天玑13号"},
+            {"product_id": "BOTTOM", "normalized": "量化FOF精选一号"},
+        ]
+        parents = _parent_map(products, [
+            ("第一创业天玑13号单一资产管理计划", "无关产品"),
+            ("第一创业天玑13号单一资产管理计划", "量化FOF精选一号私募证券投资基金"),
+        ])
+        self.assertEqual(parents["TOP"], [])
+        self.assertEqual(parents["BOTTOM"], ["第一创业天玑13号单一资产管理计划"])
+
+    def test_sync_removes_cached_files_no_longer_in_registry(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = os.path.join(root, "cache.sqlite3")
+            import sqlite3
+            connection = sqlite3.connect(cache)
+            connection.execute("CREATE TABLE files (path TEXT PRIMARY KEY,size INTEGER,mtime_ns INTEGER,"
+                               "sha256 TEXT,product_id TEXT,product_name TEXT,valuation_date TEXT,"
+                               "nav REAL,accumulated_nav REAL,net_assets REAL,shares REAL,"
+                               "holdings_json TEXT,holding_count INTEGER,error TEXT,updated_at TEXT)")
+            connection.execute("INSERT INTO files VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                               (os.path.join(root, "excluded.xls"), 1, 1, "hash", "SB9057",
+                                "中信建投聚智多策略9号FOF单一资产管理计划", "2026-09-10",
+                                1, 1, 1, 1, "[]", 0, None, "2026-09-10"))
+            connection.commit()
+            connection.close()
+            manifest = sync_bottom_return_cache(root, [], cache)
+            connection = sqlite3.connect(cache)
+            try:
+                remaining = connection.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+            finally:
+                connection.close()
+        self.assertEqual(manifest["product_count"], 0)
+        self.assertEqual(remaining, 0)
 
     def test_boundaries_nav_metrics_whitelist_and_no_ledger_fields(self):
         with tempfile.TemporaryDirectory() as folder:

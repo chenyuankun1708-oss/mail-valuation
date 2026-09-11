@@ -3,7 +3,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from valuation_app.underlying_assets import parse_underlying_asset
+from valuation_app.underlying_assets import (
+    build_underlying_asset_payload, is_configured_top_product, parse_underlying_asset,
+)
 
 
 class UnderlyingAssetTest(unittest.TestCase):
@@ -56,6 +58,30 @@ class UnderlyingAssetTest(unittest.TestCase):
         ]
         item = parse_underlying_asset(os.path.join(tempfile.gettempdir(), "未知模板_证券投资基金估值表.xls"))
         self.assertEqual(len(item["warnings"]), 1)
+
+    def test_payload_excludes_configured_top_products_only(self):
+        with tempfile.TemporaryDirectory() as root:
+            names = {
+                "top.xls": "第一创业天玑13号单一资产管理计划",
+                "bottom.xls": "量化FOF精选一号私募证券投资基金",
+            }
+            for filename in names:
+                with open(os.path.join(root, filename), "wb") as output:
+                    output.write(b"test")
+
+            def parsed(path):
+                return {"product": names[os.path.basename(path)], "valuation_date": "2026-09-10",
+                        "stock_market_value": 1, "index_futures_long": 0,
+                        "index_futures_short": 0, "long_exposure": 1,
+                        "net_assets": 1, "long_exposure_ratio": 100,
+                        "source_file": os.path.basename(path), "evidence": [], "warnings": []}
+
+            with patch("valuation_app.underlying_assets.parse_underlying_asset", side_effect=parsed):
+                payload = build_underlying_asset_payload(root)
+        self.assertEqual([item["product"] for item in payload["items"]],
+                         ["量化FOF精选一号私募证券投资基金"])
+        self.assertTrue(is_configured_top_product(" 第一创业天玑13号单一资产管理计划 "))
+        self.assertFalse(is_configured_top_product("量化FOF精选一号私募证券投资基金"))
 
 
 if __name__ == "__main__":

@@ -124,6 +124,7 @@ class ShareServerTest(unittest.TestCase):
         self.assertEqual(self.request(token, path=path + "&security=600000")[0], 400)
         self.assertEqual(self.request(token, path=path.replace("2026-01-01", "bad-date"))[0], 400)
         self.assertEqual(self.request(token, path=path.replace("P001", "UNKNOWN"))[0], 404)
+        self.assertEqual(self.request(token, path=path.replace("P001", "SB9057"))[0], 404)
         self.assertEqual(self.request(token, path="/api/bottom-returns/../secret")[0], 404)
 
     def test_valuation_archive_download_is_authenticated(self):

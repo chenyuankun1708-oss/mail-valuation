@@ -1,8 +1,18 @@
 import os
 import re
 
+from .config import PRODUCTS
 from .labels import normalize_name
 from .parser import _find_date, _holding_column, _number, _rows
+
+
+TOP_LEVEL_PRODUCT_NAMES = frozenset(normalize_name(name) for name in PRODUCTS)
+
+
+def is_configured_top_product(product_name):
+    """Return true only for one of the configured top-level FOF products."""
+    normalized = normalize_name(product_name)
+    return bool(normalized and normalized in TOP_LEVEL_PRODUCT_NAMES)
 
 
 def _cell(row, index):
@@ -110,6 +120,8 @@ def build_underlying_asset_payload(root, fof_holdings=()):
             path = os.path.join(base, filename)
             try:
                 item = parse_underlying_asset(path)
+                if is_configured_top_product(item["product"]):
+                    continue
                 normalized = normalize_name(item["product"])
                 parents = sorted({fof for fof, _, candidate in holding_map
                                   if normalized and (normalized in candidate or candidate in normalized)})

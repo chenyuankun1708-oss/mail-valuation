@@ -8,7 +8,7 @@ from datetime import datetime
 
 from .labels import normalize_name
 from .parser import _holding_column, _number, _rows, parse_valuation
-from .underlying_assets import _product_name
+from .underlying_assets import _product_name, is_configured_top_product
 
 
 BENCHMARK_CODES = ("000852", "000905", "000300", "932000")
@@ -131,7 +131,7 @@ def _registry(root):
             continue
         files = sorted(_excel_files(folder), reverse=True)
         product_name = _product_name(files[0], []) if files else ""
-        if product_name:
+        if product_name and not is_configured_top_product(product_name):
             products.append({"product_id": product_id, "product": product_name,
                              "normalized": normalize_name(product_name), "folder": folder})
     return products
@@ -161,8 +161,6 @@ def _parent_products(product_name, fof_holdings):
     target = normalize_name(product_name)
     parents = set()
     for fof, holding in fof_holdings:
-        if target and normalize_name(fof) == target:
-            parents.add(fof)
         candidate = normalize_name(holding)
         if target and candidate and (target == candidate or
                                      (min(len(target), len(candidate)) >= 4 and
@@ -174,13 +172,12 @@ def _parent_products(product_name, fof_holdings):
 def _parent_map(products, fof_holdings):
     result = {product["product_id"]: set() for product in products}
     for fof, holding in fof_holdings:
-        fof_name = normalize_name(fof)
         candidate = normalize_name(holding)
         for product in products:
             target = product["normalized"]
-            if target and (target == fof_name or (candidate and (
+            if target and candidate and (
                     target == candidate or (min(len(target), len(candidate)) >= 4 and
-                                            (target in candidate or candidate in target))))):
+                                            (target in candidate or candidate in target))):
                 result[product["product_id"]].add(fof)
     return {key: sorted(value) for key, value in result.items()}
 

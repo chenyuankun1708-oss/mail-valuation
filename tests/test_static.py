@@ -150,6 +150,7 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("const row=document.querySelector('.top-info')", HTML)
         self.assertIn("risk.textContent='风控页面'", HTML)
         self.assertIn("underlying.textContent='组合多空'", HTML)
+        self.assertIn("17只配置顶层FOF已按标准化产品名称精确排除", HTML)
         self.assertIn("网页更新时间：", HTML)
         self.assertIn("'000852','000905','000300','932000'", HTML)
         self.assertNotIn("'868008','NH0100','IXIC'", HTML)
@@ -183,6 +184,8 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("BOTTOM_BENCHMARKS", HTML)
         self.assertIn("bottomReturnState.pageSize", HTML)
         self.assertIn("金额收益、申赎、分红和XIRR", HTML)
+        self.assertIn("底层收益当前登记18个真正底层产品", HTML)
+        self.assertIn("产品与父FOF自身同名不构成关联", HTML)
         self.assertIn("data-page=risk", HTML)
         main = HTML[HTML.index("main=['overview','core'"):]
         self.assertLess(main.index("'returns'"), main.index("'bottom-returns'"))
