@@ -187,6 +187,8 @@ Get-Content .\logs\share-url.txt
 
 固定地址仍依赖本机开机联网，且浏览器仍需输入`.env`中的分享用户名和密码。`scripts/install_tasks.ps1`会申请一次管理员授权，并将开机分享任务注册为“使用最高权限运行”，以访问Tailscale受保护管道；Tailscale状态字段采用兼容PowerShell 5.1的固定字段提取，不依赖整段JSON反序列化。若任务返回码为1，可用管理员PowerShell重新运行该脚本，并查看`logs/tailscale-share.log`中的失败行号和异常类型。错误日志不写异常正文，避免意外记录授权地址或敏感参数。GitHub Pages不用于部署本项目：普通Pages无法运行Python月报接口，也不提供适合本财务网页的免费私有访问控制。原`scripts/start_share.ps1`继续保留为Cloudflare随机临时域名的应急方案。
 
+分享启动脚本会携带Basic Auth检查`/api/v2/bootstrap`，确认正在运行的是当前网页版本，而不是仅检查端口是否返回401。若8000端口被无法停止的旧版进程占用，脚本会在8001至8010中选择空闲的本机回环端口、启动当前版本并把固定Tailscale地址重新指向该端口；项目存在`.venv`时优先使用其中的Python。网页出现只有文字、没有样式或交互时，可重新运行上述`start_tailscale_share.ps1`命令恢复。
+
 如果Windows重启后Tailscale服务短暂停在`NoState`，分享脚本会自动启动桌面客户端、等待连接后再恢复Python服务和Funnel；只有仍未登录或未连接时才要求人工打开Tailscale。
 
 ## 数据要求与目录

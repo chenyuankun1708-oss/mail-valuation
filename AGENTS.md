@@ -21,6 +21,7 @@
 - 所有 `python app.py ...` 命令必须使用单调时钟输出步骤及总耗时：业务JSON保留在stdout，实时计时写stderr。`refresh`须分别披露邮件与文件、数据库与缓存、数据计算和网页更新耗时；18:30计划任务通过`scripts/refresh.ps1`将相同信息和脚本总耗时写入被Git忽略的`logs/refresh.log`，不得记录凭据。
 - `logs/refresh.log`达到50MB或跨月时必须先生成并校验ZIP再轮转，失败时保留原日志，归档最多保留30份。刷新成功且配置`BACKUP_DIR`后必须创建内容寻址的增量业务快照；备份不得包含`.env`、普通运行日志、运行缓存或可重建行情缓存，恢复只能写入不存在或为空的独立目录。
 - 公网分享默认使用Tailscale Funnel固定`*.ts.net`地址，Python服务仍只监听`127.0.0.1`并保留Basic Auth；开机任务必须以最高权限调用`start_tailscale_share.ps1`，确保能够访问本机Tailscale受保护管道，Cloudflare Quick Tunnel仅作临时备用。不得把含财务数据的网页发布到公开GitHub Pages；分享地址和运行日志继续由Git忽略。
+- 分享启动不得仅凭端口返回401判断网页版本可用，必须使用Basic Auth校验当前`/api/v2/bootstrap`及资源路由；默认端口若被旧版或无关进程占用，应在有限的本机回环备用端口内启动当前版本并重定向固定Funnel。Windows网页服务必须使用独占端口绑定，存在`.venv`时启动脚本优先使用其Python解释器，禁止让新旧服务共同监听同一端口。
 - `start_tailscale_share.ps1`发现Tailscale重启后尚未进入Running状态时，必须先自动启动本机`tailscale-ipn.exe`并等待一次恢复，再决定是否报错；不得改变固定域名或绕过登录状态。
 - 网页发布采用轻量入口HTML与受Basic Auth保护的只读数据接口；首屏JSON、脚本及按页面延迟加载的市场研究、多因子、底层资产、台账/标签工作簿和风控日报VaR模块必须启用gzip、ETag及私有缓存。模块路由只能使用代码登记的固定白名单，不得接受任意路径或文件名；访客浏览器不得直连Wind、RQData或邮箱。
 - 网页HTML、CSS及JavaScript必须在`web_assets`分文件维护，不得重新嵌入Python巨型字符串或使用字符串替换补丁链拼装功能。每次构建使用`page_updated_at`生成不可变版本资源，资源全部完成后原子切换入口；固定资源路由继续受Basic Auth及白名单保护。

@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from http.server import ThreadingHTTPServer
 
-from valuation_app.web import AuthLimiter, _credentials, make_handler
+from valuation_app.web import AuthLimiter, _credentials, create_server, make_handler
 
 
 class ShareServerTest(unittest.TestCase):
@@ -90,6 +90,18 @@ class ShareServerTest(unittest.TestCase):
         status, _, body = self.request("Basic " + token, client="198.51.100.2")
         self.assertEqual(status, 200)
         self.assertIn(b"refreshed atomically", body)
+
+    def test_create_server_refuses_a_duplicate_listener(self):
+        env_path = os.path.join(self.tempdir.name, ".env")
+        with open(env_path, "w", encoding="utf-8") as output:
+            output.write("SHARE_USER=viewer\nSHARE_PASSWORD=long-password\n")
+        first = create_server(self.index_path, port=0, env_path=env_path)
+        port = first.server_address[1]
+        try:
+            with self.assertRaises(OSError):
+                create_server(self.index_path, port=port, env_path=env_path)
+        finally:
+            first.server_close()
 
     def test_protected_assets_use_gzip_etag_and_conditional_cache(self):
         token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")

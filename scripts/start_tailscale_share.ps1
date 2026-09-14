@@ -50,6 +50,25 @@ function Test-LocalShare([int]$LocalPort) {
     }
 }
 
+function Test-PortOpen([int]$LocalPort) {
+    $Client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $Pending = $Client.BeginConnect('127.0.0.1', $LocalPort, $null, $null)
+        return $Pending.AsyncWaitHandle.WaitOne(400, $false) -and $Client.Connected
+    }
+    catch { return $false }
+    finally { $Client.Close() }
+}
+
+function Test-CurrentLocalShare([int]$LocalPort, [hashtable]$Headers) {
+    try {
+        $Response = Invoke-WebRequest -Uri ("http://127.0.0.1:{0}/api/v2/bootstrap" -f $LocalPort) `
+            -Headers $Headers -UseBasicParsing -TimeoutSec 5
+        return $Response.StatusCode -eq 200 -and $Response.Content -match '"navigation"'
+    }
+    catch { return $false }
+}
+
 if (-not (Test-Path -LiteralPath $EnvPath)) {
     throw 'Missing .env. Run scripts\set_share_credentials.ps1 first.'
 }
@@ -57,6 +76,12 @@ $EnvText = Get-Content -LiteralPath $EnvPath -Raw -Encoding UTF8
 if ($EnvText -notmatch '(?m)^\s*SHARE_USER\s*=.+$' -or $EnvText -notmatch '(?m)^\s*SHARE_PASSWORD\s*=.{12,}$') {
     throw 'SHARE_USER or SHARE_PASSWORD is missing, or the password is shorter than 12 characters.'
 }
+$UserMatch = [regex]::Match($EnvText, '(?m)^\s*SHARE_USER\s*=\s*([^\r\n]+)')
+$PasswordMatch = [regex]::Match($EnvText, '(?m)^\s*SHARE_PASSWORD\s*=\s*([^\r\n]+)')
+$ShareUser = $UserMatch.Groups[1].Value.Trim().Trim('"').Trim("'")
+$SharePassword = $PasswordMatch.Groups[1].Value.Trim().Trim('"').Trim("'")
+$CredentialBytes = [Text.Encoding]::UTF8.GetBytes(('{0}:{1}' -f $ShareUser, $SharePassword))
+$AuthHeaders = @{ Authorization = 'Basic ' + [Convert]::ToBase64String($CredentialBytes) }
 
 $Tailscale = Find-Tailscale
 $StatusText = (& $Tailscale status --json 2>$null | Out-String)
@@ -77,22 +102,41 @@ $DnsName = if ($DnsMatch.Success) { $DnsMatch.Groups[1].Value } else { '' }
 if (-not $DnsName) { throw 'Tailscale did not return a MagicDNS name. Enable MagicDNS and retry.' }
 $DnsName = $DnsName.TrimEnd('.')
 
-if (-not (Test-LocalShare $Port)) {
-    $Listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    if ($Listener) { throw "Port $Port is already used by another process." }
-    $Python = (Get-Command python -ErrorAction Stop).Source
-    Start-Process -FilePath $Python -ArgumentList @('app.py', 'share', '--port', $Port, '--no-browser') `
+$ActivePort = $Port
+$CurrentShare = Test-CurrentLocalShare $ActivePort $AuthHeaders
+if (-not $CurrentShare -and (Test-PortOpen $ActivePort)) {
+    $RequestedPort = $ActivePort
+    $ActivePort = $null
+    foreach ($Candidate in (($RequestedPort + 1)..($RequestedPort + 10))) {
+        if (Test-CurrentLocalShare $Candidate $AuthHeaders) {
+            $ActivePort = $Candidate
+            $CurrentShare = $true
+            break
+        }
+        if (-not (Test-PortOpen $Candidate)) {
+            $ActivePort = $Candidate
+            break
+        }
+    }
+    if ($null -eq $ActivePort) { throw 'No available loopback fallback port was found.' }
+    Write-ShareLog ("Port {0} is occupied by an outdated or unrelated service; using {1}." -f $RequestedPort, $ActivePort)
+}
+
+if (-not $CurrentShare) {
+    $VenvPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
+    $Python = if (Test-Path -LiteralPath $VenvPython) { $VenvPython } else { (Get-Command python -ErrorAction Stop).Source }
+    Start-Process -FilePath $Python -ArgumentList @('app.py', 'share', '--port', $ActivePort, '--no-browser') `
         -WorkingDirectory $ProjectRoot -WindowStyle Hidden -RedirectStandardOutput $ServerOut `
         -RedirectStandardError $ServerErr | Out-Null
     Start-Sleep -Seconds 3
-    if (-not (Test-LocalShare $Port)) { throw "The web server failed to start. See $ServerErr." }
+    if (-not (Test-CurrentLocalShare $ActivePort $AuthHeaders)) { throw "The current web server failed to start. See $ServerErr." }
     Write-ShareLog 'The password-protected local web server started.'
 }
 else {
-    Write-ShareLog 'The local web server is already running; no duplicate was started.'
+    Write-ShareLog 'The current local web server is already running; no duplicate was started.'
 }
 
-$FunnelOutput = & $Tailscale funnel --bg --yes $Port 2>&1
+$FunnelOutput = & $Tailscale funnel --bg --yes $ActivePort 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-ShareLog ("Funnel failed with exit code $LASTEXITCODE. Command output was not logged because it may contain an authorization URL.")
     throw 'Tailscale Funnel failed. Initial enablement may require an Administrator PowerShell and browser approval.'

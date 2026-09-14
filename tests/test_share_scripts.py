@@ -14,9 +14,14 @@ def read_script(name):
 class ShareScriptTest(unittest.TestCase):
     def test_tailscale_start_is_persistent_idempotent_and_keeps_loopback(self):
         text = read_script("start_tailscale_share.ps1")
-        self.assertIn("funnel --bg --yes $Port", text)
+        self.assertIn("funnel --bg --yes $ActivePort", text)
         self.assertIn("http://127.0.0.1", text)
         self.assertIn("Test-LocalShare", text)
+        self.assertIn("Test-CurrentLocalShare", text)
+        self.assertIn("/api/v2/bootstrap", text)
+        self.assertIn("Test-PortOpen", text)
+        self.assertIn("outdated or unrelated service", text)
+        self.assertIn(".venv\\Scripts\\python.exe", text)
         self.assertIn("no duplicate was started", text)
         self.assertIn("share-url.txt", text)
         self.assertIn("'/#home'", text)

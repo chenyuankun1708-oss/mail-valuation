@@ -5,6 +5,7 @@ import hmac
 import json
 import os
 import re
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -908,11 +909,23 @@ def make_handler(index_path, user, password, limiter=None):
     return Handler
 
 
+class _ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
+    """Prevent two dashboard generations from sharing one Windows port."""
+
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        ThreadingHTTPServer.server_bind(self)
+
+
 def create_server(index_path="index.html", host="127.0.0.1", port=8000, env_path=".env"):
     if host not in ("127.0.0.1", "localhost"):
         raise ValueError("分享服务只允许绑定127.0.0.1")
     user, password = _credentials(env_path)
-    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(index_path, user, password))
+    return _ExclusiveThreadingHTTPServer(("127.0.0.1", port),
+                                         make_handler(index_path, user, password))
 
 
 def serve(index_path="index.html", host="127.0.0.1", port=8000, open_browser=True, env_path=".env",
