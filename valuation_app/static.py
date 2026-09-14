@@ -4,7 +4,8 @@ import os
 import shutil
 import tempfile
 
-from .config import PRODUCTS
+from .config import PRODUCTS, TOP_PRODUCT_IDS
+from .analysis_cache import build_analysis_database, source_record, _known_hashes
 from .benchmark import page_payload as benchmark_page_payload
 from .bottom_returns import sync_bottom_return_cache
 from .ledger import load_ledger, load_product_metadata
@@ -43,11 +44,18 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
     flows, ledger_errors = load_ledger(ledger_path, snapshots) if os.path.exists(ledger_path) else ([], [{"error": "未找到专户资金台账.xlsx"}])
     metadata, metadata_errors = load_product_metadata(ledger_path) if os.path.exists(ledger_path) else ({}, [])
     ledger_errors.extend(metadata_errors)
-    grouped = {name: {"name": name, "points": [], "flows": [],
+    grouped = {name: {"product_id": TOP_PRODUCT_IDS[name], "name": name, "points": [], "flows": [],
                       "total_investment": metadata.get(name, {}).get("total_investment"),
                       "approved_quota": metadata.get(name, {}).get("approved_quota", 0)} for name in PRODUCTS}
+    root = os.path.dirname(os.path.abspath(products_dir))
+    analysis_path = os.path.join(root, ".runtime", "analysis.sqlite3")
+    known_source_hashes = _known_hashes(analysis_path)
+    source_records = {}
     for snapshot in snapshots:
         point = snapshot.as_dict()
+        record = source_record(point["source_file"], known_source_hashes)
+        source_records[record["path"]] = record
+        point["source_sha256"] = record["sha256"]
         point["source_file"] = os.path.basename(point.get("source_file", ""))
         grouped[snapshot.product]["points"].append(point)
     for flow in flows:
@@ -62,7 +70,6 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
     end_holding_names = [holding["name"] for product in grouped.values()
                          for holding in ((product["points"][-1].get("holdings", []))
                                          if product["points"] else [])]
-    root = os.path.dirname(os.path.abspath(products_dir))
     labels = build_label_payload(
         holding_names, os.path.join(root, "data_sources", "product_labels.json"),
         auto_add_names=end_holding_names,
@@ -109,6 +116,8 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
                "factors": factor_page_payload(), "market_research": market_research_page_payload(),
                "strategy_lab": strategy_lab,
                "default_start": "2026-06-30" if "2026-06-30" in dates else min(dates), "default_end": max(dates)}
+    build_analysis_database(analysis_path, payload["products"], payload["page_updated_at"],
+                            source_records.values())
     if timing_callback:
         timing_callback("finish", "估值扫描与数据计算", "数据计算",
                         time.perf_counter() - calculation_started, "success")

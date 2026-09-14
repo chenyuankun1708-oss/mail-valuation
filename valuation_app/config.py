@@ -21,6 +21,18 @@ PRODUCTS = OrderedDict([
     ("五矿证券FOF51号单一资产管理计划", ("五矿证券FOF51号", "FOF51号")),
 ])
 
+# Stable internal identities are deliberately separate from display names and
+# valuation-sheet aliases.  Never derive these from holding subject codes.
+TOP_PRODUCT_IDS = OrderedDict(
+    (name, "top-%03d" % position)
+    for position, name in enumerate(PRODUCTS, 1)
+)
+TOP_PRODUCTS_BY_ID = {product_id: name for name, product_id in TOP_PRODUCT_IDS.items()}
+
+
+def product_id_for_name(name):
+    return TOP_PRODUCT_IDS.get(name)
+
 
 def match_product(text):
     normalized = str(text).replace(" ", "").upper()
