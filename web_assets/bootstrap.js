@@ -27,6 +27,7 @@ function renderHome(payload){
 }
 function start(){
  var hash=(location.hash||'').replace(/^#/,'');
+ window.__FOF_INITIAL_HASH__=hash;
  if(!hash){history.replaceState(null,'','#home');hash='home'}
  if(hash!=='home'){loadApplication();return}
  fetch('/api/v2/bootstrap',{credentials:'same-origin'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(renderHome).catch(function(error){loadApplication()})

@@ -11,6 +11,8 @@
 
 网页首先读取受Basic Auth保护的`/api/v2/bootstrap`轻量摘要，欢迎页不下载完整持仓；进入具体页面时仍保留`/api/page-data`兼容加载。v2同时提供固定参数的`overview`、`top-returns/<product_id>`、`strategy`、`factors`及单产品因子接口，市场研究通过`/api/v2/market/{macro|industry|style|futures|options|etf}`分模块读取。所有响应统一披露版本、生成时间、数据截止日、来源数、状态及警告，继续支持gzip、ETag和私有缓存；策略分页限制20至200行。策略实验室重算通过固定`python app.py strategy-lab`子进程单任务运行，状态保存在`.runtime/strategy-tasks.json`，网页轮询同一受保护任务接口。
 
+网页帮助和工程历史的结构化源分别为`web_assets/help.json`与`web_assets/history.json`，由`build`写入网页数据；“模块数据状态”统一展示估值、行情、标签、知识库、底层收益和策略实验室的截止时间、来源数、当前/回退/缺失状态及警告数。文档按职责维护：本README只保留安装、运行、备份和恢复流程，`CALCULATION_METHOD.md`保存公式，`AGENTS.md`保存约束，`logs/CHANGELOG.md`保存可审计变更，不再复制同一说明段落。
+
 网页生成时才会读取估值表和本机数据库缓存；访客浏览器不会连接Wind、RQData或邮箱。生成结果采用轻量`index.html`、首屏`/api/page-data`和固定白名单模块接口：市场研究、策略实验室摘要、多因子、底层资产、台账/标签工作簿及风控日报VaR仅在打开对应页面时下载。策略完整逐期结果保留在本机，网页模块只传输指标、最新模型与建议。接口和`app.js`沿用网页Basic Auth，响应使用gzip、ETag与私有缓存；白名单之外的文件路径不能通过网页读取。当前首屏压缩传输量由原整页约14.3MB降至约1.8MB，具体大小随估值数据增长而变化。
 
 每次网页重建都会用数据更新时间生成新的`app.js`版本参数，同时脚本响应强制校验ETag；因此功能更新后普通刷新即可获取新版，不应再短暂显示旧按钮或旧布局。

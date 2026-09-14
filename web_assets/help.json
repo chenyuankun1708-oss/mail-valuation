@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "data-status",
+      "title": "模块数据状态",
+      "summary": "统一核对估值、行情、标签、知识库、底层收益和策略实验室的数据截止日、刷新结果与回退状态。"
+    },
+    {
+      "id": "delivery",
+      "title": "网页数据交付",
+      "summary": "首页先加载v2摘要；进入功能页后按登记ID和固定参数加载数据，旧接口在兼容周期内保留。"
+    },
+    {
+      "id": "recovery",
+      "title": "备份与恢复",
+      "summary": "刷新成功后创建内容寻址快照；恢复只写入新的空目录，校验后由人工决定是否替换。"
+    },
+    {
+      "id": "documentation",
+      "title": "文档职责",
+      "summary": "网页帮助和历史由结构化数据生成；README讲运行与恢复，计算说明讲公式，AGENTS维护约束，CHANGELOG记录审计事实。"
+    }
+  ]
+}

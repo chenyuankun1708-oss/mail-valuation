@@ -27,6 +27,8 @@ STYLE = _asset_text("styles.css")
 CORE_JS = _asset_text("core.js")
 DASHBOARD_JS = _asset_text("dashboard.js")
 BOOTSTRAP_JS = _asset_text("bootstrap.js")
+HELP_DATA = json.loads(_asset_text("help.json"))
+HISTORY_DATA = json.loads(_asset_text("history.json"))
 SHELL = _asset_text("shell.html")
 # Compatibility aggregate for calculation tests and downstream imports.
 HTML = SHELL.replace('<link rel="stylesheet" href="__STYLE_URL__">',
@@ -89,6 +91,7 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
     underlying_assets = build_underlying_asset_payload(os.path.join(root, "底层资产"), fof_holdings)
     bottom_returns = sync_bottom_return_cache(os.path.join(root, "底层资产"), fof_holdings)
     risk_payload = risk_page_payload()
+    benchmark_payload = benchmark_page_payload(earliest_date=min(dates))
     try:
         with open(os.path.join(root, "strategy_lab_data", "result.json"), "r", encoding="utf-8") as handle:
             strategy_result = json.load(handle)
@@ -109,13 +112,40 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
                 "training_samples", "alpha", "coefficients", "constraints")}
     except (OSError, ValueError):
         strategy_lab = {}
+    knowledge_path = os.path.join(root, "knowledge_base", "knowledge.sqlite3")
+    module_status = {
+        "valuations": {"name": "估值", "status": "current" if dates else "missing",
+                       "data_cutoff": max(dates) if dates else None,
+                       "source_count": len(snapshots), "warnings": len(parse_errors)},
+        "market": {"name": "行情", "status": "current" if benchmark_payload.get("available") else "missing",
+                   "data_cutoff": benchmark_payload.get("updated_at") or (max(dates) if dates else None),
+                   "source_count": len((benchmark_payload.get("indices") or {})),
+                   "warnings": 0},
+        "labels": {"name": "标签", "status": "current" if labels.get("records") is not None else "missing",
+                   "data_cutoff": labels.get("updated_at"), "source_count": labels.get("record_count", 0),
+                   "warnings": len(labels.get("errors") or [])},
+        "knowledge": {"name": "知识库", "status": "current" if os.path.exists(knowledge_path) else "missing",
+                      "data_cutoff": (__import__("datetime").datetime.fromtimestamp(os.path.getmtime(knowledge_path)).isoformat()
+                                      if os.path.exists(knowledge_path) else None),
+                      "source_count": 1 if os.path.exists(knowledge_path) else 0, "warnings": 0},
+        "bottom_returns": {"name": "底层收益", "status": "current" if bottom_returns.get("products") else "missing",
+                           "data_cutoff": bottom_returns.get("updated_at"),
+                           "source_count": len(bottom_returns.get("products") or []),
+                           "warnings": len(bottom_returns.get("errors") or [])},
+        "strategy_lab": {"name": "策略实验室", "status": strategy_lab.get("status") or "missing",
+                         "data_cutoff": strategy_lab.get("generated_at"),
+                         "source_count": len(strategy_lab.get("recommendations") or []),
+                         "warnings": 0},
+    }
     payload = {"products": list(grouped.values()), "parse_errors": safe_parse_errors, "ledger_errors": ledger_errors,
                "page_updated_at": __import__("datetime").datetime.now().replace(microsecond=0).isoformat(),
-               "benchmarks": benchmark_page_payload(earliest_date=min(dates)), "risk": risk_payload,
+               "benchmarks": benchmark_payload, "risk": risk_payload,
                "labels": labels, "ledger_tables": ledger_tables, "underlying_assets": underlying_assets,
                "bottom_returns": bottom_returns,
                "factors": factor_page_payload(), "market_research": market_research_page_payload(),
                "strategy_lab": strategy_lab,
+               "module_status": module_status,
+               "documentation": {"help": HELP_DATA, "history": HISTORY_DATA},
                "default_start": "2026-06-30" if "2026-06-30" in dates else min(dates), "default_end": max(dates)}
     build_analysis_database(analysis_path, payload["products"], payload["page_updated_at"],
                             source_records.values())

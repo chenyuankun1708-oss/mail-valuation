@@ -30,6 +30,16 @@ class WebAssetSourceTest(unittest.TestCase):
         self.assertIn("overview/report", source)
         self.assertIn("aria-expanded", source)
 
+    def test_structured_help_history_and_status_page_are_registered(self):
+        root = os.path.dirname(os.path.dirname(__file__))
+        for name in ("help.json", "history.json"):
+            with open(os.path.join(root, "web_assets", name), "r", encoding="utf-8") as handle:
+                payload = __import__("json").load(handle)
+            self.assertEqual(1, payload["schema_version"])
+        self.assertIn("data-status", {item["id"] for item in static.HELP_DATA["sections"]})
+        self.assertIn("function renderDataStatus()", static.DASHBOARD_JS)
+        self.assertIn("DASH_PAGES.status='模块数据状态'", static.DASHBOARD_JS)
+
 
 if __name__ == "__main__":
     unittest.main()
