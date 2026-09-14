@@ -30,6 +30,15 @@ class WebAssetSourceTest(unittest.TestCase):
         self.assertIn("overview/report", source)
         self.assertIn("aria-expanded", source)
 
+    def test_initial_calculation_waits_for_dashboard_dependencies(self):
+        core = static.CORE_JS
+        dashboard = static.DASHBOARD_JS
+        self.assertNotIn("endDate.value=RAW.default_end;calculate();", core)
+        self.assertIn("productReturnTableStyles();calculate();initInvestmentDashboard();",
+                      dashboard)
+        self.assertLess(dashboard.index("function portfolioGroupRows(end)"),
+                        dashboard.index("installDataStatusPage();"))
+
     def test_structured_help_history_and_status_page_are_registered(self):
         root = os.path.dirname(os.path.dirname(__file__))
         for name in ("help.json", "history.json"):
