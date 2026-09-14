@@ -6,6 +6,8 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -17,6 +19,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 from .mail import load_env
 from .labels import LabelConflictError, build_label_payload, mutate_catalog
 from .bottom_returns import analyze_bottom_return
+from . import api_v2
 
 
 class AuthLimiter:
@@ -115,6 +118,72 @@ class LLMTaskManager:
             return dict(task) if task else None
 
 
+class StrategyTaskManager:
+    """Run the fixed strategy rebuild command with one isolated worker."""
+
+    def __init__(self, root, max_tasks=20):
+        self.root = os.path.abspath(root)
+        self.path = os.path.join(self.root, ".runtime", "strategy-tasks.json")
+        self.max_tasks = max_tasks
+        self.lock = threading.Lock()
+        self.tasks = {}
+        try:
+            with open(self.path, "r", encoding="utf-8") as handle:
+                saved = json.load(handle)
+            self.tasks = {item["id"]: item for item in saved.get("tasks", [])}
+            for item in self.tasks.values():
+                if item.get("status") == "running":
+                    item["status"] = "interrupted"
+        except (OSError, ValueError, KeyError):
+            pass
+
+    def _save(self):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        ordered = sorted(self.tasks.values(), key=lambda item: item.get("created_at", 0))[-self.max_tasks:]
+        temporary = self.path + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump({"version": 1, "tasks": ordered}, handle, ensure_ascii=False, indent=2)
+        os.replace(temporary, self.path)
+
+    def submit(self):
+        with self.lock:
+            running = next((item for item in self.tasks.values()
+                            if item.get("status") == "running"), None)
+            if running:
+                return running["id"], False
+            task_id = "rebuild-%d" % int(time.time() * 1000)
+            self.tasks[task_id] = {"id": task_id, "task_type": "strategy-lab-rebuild",
+                                   "status": "running", "created_at": time.time(),
+                                   "finished_at": None, "error": None}
+            self._save()
+        worker = threading.Thread(target=self._run, args=(task_id,))
+        worker.daemon = True
+        worker.start()
+        return task_id, True
+
+    def _run(self, task_id):
+        try:
+            completed = subprocess.run(
+                [sys.executable, os.path.join(self.root, "app.py"), "strategy-lab"],
+                cwd=self.root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=3600, check=False)
+            status = "ok" if completed.returncode == 0 else "failed"
+            error = None if completed.returncode == 0 else (
+                "strategy process exited with code %s" % completed.returncode)
+        except Exception as exc:
+            status, error = "failed", "%s: %s" % (type(exc).__name__, exc)
+        with self.lock:
+            task = self.tasks.get(task_id)
+            if task:
+                task.update(status=status, error=error, finished_at=time.time())
+                self._save()
+
+    def get(self, task_id):
+        with self.lock:
+            task = self.tasks.get(task_id)
+            return dict(task) if task else None
+
+
 def _llm_root():
     """strategy_lab 所在的项目根（web.py 位于 valuation_app/ 下）。"""
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -132,6 +201,7 @@ def make_handler(index_path, user, password, limiter=None):
     label_lock = threading.Lock()
     knowledge_lock = threading.Lock()
     llm_tasks = LLMTaskManager()
+    strategy_tasks = StrategyTaskManager(os.path.dirname(index_path))
     asset_cache = {}
     module_files = {
         "factors": "factors.json",
@@ -339,7 +409,7 @@ def make_handler(index_path, user, password, limiter=None):
                 self.wfile.write(body)
 
         def _serve_versioned_asset(self, route, include_body=True):
-            match = re.match(r"^/assets/([0-9a-f]{16})/(styles\.css|core\.js|dashboard\.js)$", route)
+            match = re.match(r"^/assets/([0-9a-f]{16})/(styles\.css|bootstrap\.js|core\.js|dashboard\.js)$", route)
             if not match:
                 return False
             version, filename = match.groups()
@@ -388,6 +458,94 @@ def make_handler(index_path, user, password, limiter=None):
                 return
             self._send_cached_json(result, include_body)
 
+        def _serve_v2(self, route, include_body=True):
+            if not self._authenticate():
+                return
+            root = os.path.dirname(index_path)
+            try:
+                page = api_v2.read_json(os.path.join(root, ".runtime", "page-data.json"))
+                parsed = urlsplit(self.path)
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                if route == "/api/v2/bootstrap":
+                    api_v2.query_one(query, ())
+                    modules = {}
+                    for name, filename in module_files.items():
+                        path = os.path.join(root, ".runtime", "modules", filename)
+                        modules[name] = {"status": "current" if os.path.exists(path) else "missing",
+                                         "bytes": os.path.getsize(path) if os.path.exists(path) else 0}
+                    payload = api_v2.bootstrap(page, modules)
+                elif route == "/api/v2/overview":
+                    values = api_v2.query_one(query, ("start", "end", "scope"))
+                    start = api_v2.iso_date(values.get("start"), "start")
+                    end = api_v2.iso_date(values.get("end"), "end")
+                    if start >= end:
+                        raise ValueError("start must precede end")
+                    payload = api_v2.overview(page, start, end, values.get("scope", "all"))
+                elif route.startswith("/api/v2/top-returns/"):
+                    product_id = route[len("/api/v2/top-returns/"):]
+                    if not re.match(r"^top-[0-9]{3}$", product_id):
+                        raise KeyError("product is not registered")
+                    values = api_v2.query_one(query, ("start", "end", "benchmark"))
+                    start = api_v2.iso_date(values.get("start"), "start")
+                    end = api_v2.iso_date(values.get("end"), "end")
+                    if start >= end:
+                        raise ValueError("start must precede end")
+                    payload = api_v2.top_returns(page, product_id, start, end,
+                                                 values.get("benchmark", "000852"))
+                elif route == "/api/v2/strategy":
+                    values = api_v2.query_one(query, ("start", "end", "page", "page_size") +
+                                               api_v2.FILTER_FIELDS)
+                    start = api_v2.iso_date(values.get("start"), "start")
+                    end = api_v2.iso_date(values.get("end"), "end")
+                    if start >= end:
+                        raise ValueError("start must precede end")
+                    page_number = int(values.get("page", "1"))
+                    page_size = int(values.get("page_size", "50"))
+                    if page_number < 1 or page_size < 20 or page_size > 200:
+                        raise ValueError("pagination is outside the allowed range")
+                    filters = {field: values.get(field, "") for field in api_v2.FILTER_FIELDS}
+                    holding_names = [holding.get("name") for product in page.get("products", [])
+                                     for point in product.get("points", [])
+                                     for holding in point.get("holdings", []) if holding.get("name")]
+                    page["labels"] = build_label_payload(holding_names, self._labels_path())
+                    allowed = page.get("labels", {}).get("deduped_records", [])
+                    for field, value in filters.items():
+                        if value and value not in {str(item.get(field) or ("无" if field == "department" else "其他"))
+                                                   for item in allowed}:
+                            raise ValueError("label filter is not registered")
+                    payload = api_v2.strategy(page, start, end, filters, page_number, page_size)
+                elif route in ("/api/v2/factors",) or route.startswith("/api/v2/factors/"):
+                    api_v2.query_one(query, ())
+                    factors = api_v2.read_json(os.path.join(root, ".runtime", "modules", "factors.json"))
+                    if route == "/api/v2/factors":
+                        payload = api_v2.factor_list(page, factors)
+                    else:
+                        product_id = route[len("/api/v2/factors/"):]
+                        if not re.match(r"^top-[0-9]{3}$", product_id):
+                            raise KeyError("product is not registered")
+                        payload = api_v2.factor_detail(page, factors, product_id)
+                elif route.startswith("/api/v2/market/"):
+                    api_v2.query_one(query, ())
+                    module = route[len("/api/v2/market/"):]
+                    if not re.match(r"^[a-z]+$", module):
+                        raise KeyError("market module is not registered")
+                    market = api_v2.read_json(os.path.join(
+                        root, ".runtime", "modules", "market-research.json"))
+                    payload = api_v2.market_module(page, market, module)
+                else:
+                    self.send_error(404)
+                    return
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+                return
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            except OSError as exc:
+                self._send_json(503, {"error": "v2 data is unavailable: %s" % type(exc).__name__})
+                return
+            self._send_cached_json(payload, include_body)
+
         def _read_json(self, max_length=1024 * 1024):
             try:
                 length = int(self.headers.get("Content-Length", "0"))
@@ -406,16 +564,10 @@ def make_handler(index_path, user, password, limiter=None):
         def _serve_strategy_lab_regenerate(self):
             if not self._authenticate():
                 return
-            try:
-                from strategy_lab.pipeline import run as run_strategy_lab
-                root = _llm_root()
-                result = run_strategy_lab(project_root=root)
-                self._send_json(200, {"status": result.get("status"),
-                                      "generated_at": result.get("generated_at"),
-                                      "latest_signal_date": result.get("latest_signal_date"),
-                                      "recommendations": len(result.get("recommendations") or [])})
-            except Exception as exc:
-                self._send_json(500, {"error": "策略实验室重算失败（%s）" % type(exc).__name__})
+            task_id, created = strategy_tasks.submit()
+            self._send_json(202, {"task_id": task_id, "status": "running",
+                                  "created": created,
+                                  "poll": "/api/strategy-lab/task/%s" % task_id})
 
         def _submit_llm_task(self):
             if not self._authenticate():
@@ -440,7 +592,8 @@ def make_handler(index_path, user, password, limiter=None):
             if not task_id or "/" in task_id:
                 self._send_json(400, {"error": "无效任务ID"})
                 return
-            task = llm_tasks.get(task_id)
+            task = (strategy_tasks.get(task_id) if task_id.startswith("rebuild-")
+                    else llm_tasks.get(task_id))
             if task is None:
                 self._send_json(404, {"error": "任务不存在或已过期"})
                 return
@@ -630,7 +783,9 @@ def make_handler(index_path, user, password, limiter=None):
         def do_GET(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
-            if route == "/api/monthly-report":
+            if route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
+                self._serve_v2(route)
+            elif route == "/api/monthly-report":
                 self._serve_monthly_report()
             elif route == "/api/valuation-archive":
                 self._serve_valuation_archive()
@@ -721,7 +876,9 @@ def make_handler(index_path, user, password, limiter=None):
         def do_HEAD(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
-            if route == "/api/page-data":
+            if route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
+                self._serve_v2(route, False)
+            elif route == "/api/page-data":
                 self._serve_asset(os.path.join(root, ".runtime", "page-data.json"),
                                   "application/json; charset=utf-8",
                                   "private, max-age=0, must-revalidate", False)

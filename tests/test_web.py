@@ -34,12 +34,16 @@ class ShareServerTest(unittest.TestCase):
             output.write("window.coreLoaded=true")
         with open(os.path.join(assets, "dashboard.js"), "w", encoding="utf-8") as output:
             output.write("window.dashboardLoaded=true")
+        with open(os.path.join(assets, "bootstrap.js"), "w", encoding="utf-8") as output:
+            output.write("window.bootstrapLoaded=true")
         modules = os.path.join(runtime, "modules")
         os.makedirs(modules)
         with open(os.path.join(modules, "factors.json"), "w", encoding="utf-8") as output:
             output.write('{"status":"ok"}')
         with open(os.path.join(modules, "strategy-lab.json"), "w", encoding="utf-8") as output:
             output.write('{"schema_version":1,"research_only":true}')
+        with open(os.path.join(modules, "market-research.json"), "w", encoding="utf-8") as output:
+            output.write('{"updated_at":"2026-09-14","macro":{"series":[]},"errors":[]}')
         with open(os.path.join(modules, "bottom-returns.json"), "w", encoding="utf-8") as output:
             output.write('{"products":[{"product_id":"P001","product":"底层A"}]}')
         sources = os.path.join(self.tempdir.name, "data_sources")
@@ -116,6 +120,39 @@ class ShareServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(json.loads(body.decode("utf-8"))["research_only"])
         self.assertEqual(self.request(token, path="/api/modules/not-allowed")[0], 404)
+
+    def test_v2_bootstrap_is_small_authenticated_versioned_and_cached(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        self.assertEqual(self.request(path="/api/v2/bootstrap")[0], 401)
+        status, headers, body = self.request(token, path="/api/v2/bootstrap",
+                                             extra_headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(status, 200)
+        self.assertLess(len(body), 250 * 1024)
+        payload = json.loads(gzip.decompress(body).decode("utf-8"))
+        for field in ("version", "generated_at", "data_cutoff", "source_count",
+                      "status", "warning_count", "warnings", "data"):
+            self.assertIn(field, payload)
+        self.assertEqual(payload["data"]["navigation"][0], "home")
+        self.assertIn("ETag", headers)
+        self.assertEqual(self.request(token, path="/api/v2/bootstrap?path=secret")[0], 400)
+        status, _, asset = self.request(token, path="/assets/0123456789abcdef/bootstrap.js")
+        self.assertEqual(status, 200)
+        self.assertIn(b"bootstrapLoaded", asset)
+
+    def test_v2_parameter_whitelists_pagination_and_path_traversal(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        base = "/api/v2/overview?start=2026-01-01&end=2026-02-01&scope=all"
+        self.assertEqual(self.request(token, path=base)[0], 200)
+        self.assertEqual(self.request(token, path=base.replace("scope=all", "scope=bad"))[0], 400)
+        self.assertEqual(self.request(token, path=base + "&path=../x")[0], 400)
+        strategy = "/api/v2/strategy?start=2026-01-01&end=2026-02-01&page=1&page_size=20"
+        self.assertEqual(self.request(token, path=strategy)[0], 200)
+        self.assertEqual(self.request(token, path=strategy.replace("page_size=20", "page_size=201"))[0], 400)
+        self.assertEqual(self.request(token, path="/api/v2/top-returns/../../secret?start=2026-01-01&end=2026-02-01")[0], 404)
+        status, _, body = self.request(token, path="/api/v2/market/macro")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body.decode("utf-8"))["data"]["module"], "macro")
+        self.assertEqual(self.request(token, path="/api/v2/market/security")[0], 404)
 
     def test_bottom_return_endpoint_is_protected_validated_and_cached(self):
         token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
