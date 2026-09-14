@@ -26,6 +26,14 @@ class ShareServerTest(unittest.TestCase):
             output.write('{"products":[],"benchmarks":{"indices":{"000852":{"points":[]}}}}')
         with open(os.path.join(runtime, "app.js"), "w", encoding="utf-8") as output:
             output.write("window.loaded=true")
+        assets = os.path.join(runtime, "assets", "0123456789abcdef")
+        os.makedirs(assets)
+        with open(os.path.join(assets, "styles.css"), "w", encoding="utf-8") as output:
+            output.write("body{color:#123}")
+        with open(os.path.join(assets, "core.js"), "w", encoding="utf-8") as output:
+            output.write("window.coreLoaded=true")
+        with open(os.path.join(assets, "dashboard.js"), "w", encoding="utf-8") as output:
+            output.write("window.dashboardLoaded=true")
         modules = os.path.join(runtime, "modules")
         os.makedirs(modules)
         with open(os.path.join(modules, "factors.json"), "w", encoding="utf-8") as output:
@@ -92,6 +100,15 @@ class ShareServerTest(unittest.TestCase):
         self.assertEqual(status, 304)
         self.assertEqual(body, b"")
         self.assertEqual(self.request(path="/assets/app.js")[0], 401)
+        self.assertEqual(self.request(path="/assets/0123456789abcdef/core.js",
+                                      client="198.51.100.8")[0], 401)
+        status, versioned_headers, body = self.request(
+            token, path="/assets/0123456789abcdef/core.js",
+            extra_headers={"Accept-Encoding": "gzip"}, client="198.51.100.9")
+        self.assertEqual(status, 200)
+        self.assertEqual(gzip.decompress(body), b"window.coreLoaded=true")
+        self.assertIn("immutable", versioned_headers["Cache-Control"])
+        self.assertEqual(self.request(token, path="/assets/../../secret/core.js")[0], 404)
         status, _, body = self.request(token, path="/api/modules/factors")
         self.assertEqual(status, 200)
         self.assertEqual(body, b'{"status":"ok"}')

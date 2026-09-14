@@ -22,7 +22,7 @@
 - 公网分享默认使用Tailscale Funnel固定`*.ts.net`地址，Python服务仍只监听`127.0.0.1`并保留Basic Auth；开机任务必须以最高权限调用`start_tailscale_share.ps1`，确保能够访问本机Tailscale受保护管道，Cloudflare Quick Tunnel仅作临时备用。不得把含财务数据的网页发布到公开GitHub Pages；分享地址和运行日志继续由Git忽略。
 - `start_tailscale_share.ps1`发现Tailscale重启后尚未进入Running状态时，必须先自动启动本机`tailscale-ipn.exe`并等待一次恢复，再决定是否报错；不得改变固定域名或绕过登录状态。
 - 网页发布采用轻量入口HTML与受Basic Auth保护的只读数据接口；首屏JSON、脚本及按页面延迟加载的市场研究、多因子、底层资产、台账/标签工作簿和风控日报VaR模块必须启用gzip、ETag及私有缓存。模块路由只能使用代码登记的固定白名单，不得接受任意路径或文件名；访客浏览器不得直连Wind、RQData或邮箱。
-- 网页入口每次构建必须使用`page_updated_at`为`app.js`增加版本参数，脚本响应须重新校验ETag，避免发布后浏览器在缓存期内继续显示旧功能。
+- 网页HTML、CSS及JavaScript必须在`web_assets`分文件维护，不得重新嵌入Python巨型字符串或使用字符串替换补丁链拼装功能。每次构建使用`page_updated_at`生成不可变版本资源，资源全部完成后原子切换入口；固定资源路由继续受Basic Auth及白名单保护。
 - 原始估值表只读，不改写、不删除；下载以附件内容 SHA-256 去重。
 - 首页单日估值表压缩包只允许读取`products`目录中所选日期实际存在的已配置顶层产品原始估值表，不得向前补取；同内容去重，同产品同日多版本保留可解析持仓更完整的一份。下载接口必须沿用Basic Auth并禁止任意路径输入。
 - 不在源码、日志、测试或文档中写邮箱密码；凭据只从环境变量或被 `.gitignore` 忽略的 `.env` 读取。

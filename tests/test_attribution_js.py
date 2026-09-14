@@ -7,7 +7,7 @@ import unittest
 class AttributionJavascriptTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        path = os.path.join(os.path.dirname(__file__), "..", "valuation_app", "static.py")
+        path = os.path.join(os.path.dirname(__file__), "..", "web_assets", "dashboard.js")
         with open(path, "r", encoding="utf-8") as handle:
             lines = handle.read().splitlines()
         cls.map_source = next(line for line in lines if line.startswith("function attributionHoldingMap("))

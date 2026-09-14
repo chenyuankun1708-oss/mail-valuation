@@ -338,6 +338,18 @@ def make_handler(index_path, user, password, limiter=None):
             if include_body:
                 self.wfile.write(body)
 
+        def _serve_versioned_asset(self, route, include_body=True):
+            match = re.match(r"^/assets/([0-9a-f]{16})/(styles\.css|core\.js|dashboard\.js)$", route)
+            if not match:
+                return False
+            version, filename = match.groups()
+            content_type = ("text/css; charset=utf-8" if filename.endswith(".css")
+                            else "application/javascript; charset=utf-8")
+            self._serve_asset(os.path.join(os.path.dirname(index_path), ".runtime", "assets",
+                                           version, filename),
+                              content_type, "private, max-age=31536000, immutable", include_body)
+            return True
+
         def _serve_bottom_return(self, product_id, include_body=True):
             if not self._authenticate():
                 return
@@ -651,6 +663,8 @@ def make_handler(index_path, user, password, limiter=None):
                 self._serve_asset(os.path.join(root, ".runtime", "modules", filename),
                                   "application/json; charset=utf-8",
                                   "private, max-age=0, must-revalidate")
+            elif self._serve_versioned_asset(route):
+                return
             elif route == "/assets/app.js":
                 self._serve_asset(os.path.join(root, ".runtime", "app.js"),
                                   "application/javascript; charset=utf-8",
@@ -722,6 +736,8 @@ def make_handler(index_path, user, password, limiter=None):
                 self._serve_asset(os.path.join(root, ".runtime", "modules", filename),
                                   "application/json; charset=utf-8",
                                   "private, max-age=0, must-revalidate", False)
+            elif self._serve_versioned_asset(route, False):
+                return
             elif route == "/assets/app.js":
                 self._serve_asset(os.path.join(root, ".runtime", "app.js"),
                                   "application/javascript; charset=utf-8",
