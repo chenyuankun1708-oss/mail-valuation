@@ -4,7 +4,10 @@ import json
 import os
 import sys
 
+from dotenv import load_dotenv
+
 from valuation_app.analytics import analyze
+from valuation_app.backup import BackupError, check_backup, create_backup, restore_backup
 from valuation_app.benchmark import update_cache as update_benchmark_cache
 from valuation_app.risk import update_cache as update_risk_cache
 from valuation_app.risk import update_portfolio_var_cache
@@ -89,8 +92,9 @@ def refresh_output(result):
 
 
 def main():
+    load_dotenv()
     parser = argparse.ArgumentParser(description="从邮件估值表计算单一投资人的收益与收益率")
-    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "strategy-lab", "portfolio-var", "labels-migrate", "knowledge-add", "knowledge-import", "knowledge-check", "knowledge-reindex", "knowledge-export", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
+    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "strategy-lab", "portfolio-var", "labels-migrate", "knowledge-add", "knowledge-import", "knowledge-check", "knowledge-reindex", "knowledge-export", "backup", "backup-check", "backup-restore", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
     parser.add_argument("--products-dir", default="products")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -99,6 +103,9 @@ def main():
     parser.add_argument("--account", action="append", help="只使用指定邮箱账号，可重复传入")
     parser.add_argument("--knowledge-root", default="knowledge_base", help="本地知识库根目录")
     parser.add_argument("--knowledge-file", help="knowledge-add要导入的单个文件")
+    parser.add_argument("--backup-root", help="备份仓库；默认读取BACKUP_DIR")
+    parser.add_argument("--snapshot", help="备份快照ID；默认使用最新快照")
+    parser.add_argument("--target", help="backup-restore恢复到不存在或为空的目录")
     args = parser.parse_args()
     timing = TimingRecorder()
     atexit.register(timing.print_summary)
@@ -188,6 +195,25 @@ def main():
                 value = store.rebuild_index()
             else:
                 value = store.export_metadata(os.path.join(args.knowledge_root, "exports", "metadata.json"))
+        print(json.dumps(value, ensure_ascii=False, indent=2))
+    elif args.command in ("backup", "backup-check", "backup-restore"):
+        backup_root = args.backup_root or os.environ.get("BACKUP_DIR")
+        if not backup_root:
+            parser.error("请通过BACKUP_DIR或--backup-root配置备份目录")
+        project_root = os.path.abspath(os.path.dirname(args.products_dir))
+        try:
+            with timing.step("业务数据备份", "命令执行"):
+                if args.command == "backup":
+                    retention = int(os.environ.get("BACKUP_RETENTION_COUNT", "30"))
+                    value = create_backup(project_root, backup_root, retention)
+                elif args.command == "backup-check":
+                    value = check_backup(backup_root, args.snapshot)
+                else:
+                    if not args.target:
+                        parser.error("backup-restore必须提供--target")
+                    value = restore_backup(backup_root, args.target, args.snapshot)
+        except (BackupError, OSError) as exc:
+            parser.error(str(exc))
         print(json.dumps(value, ensure_ascii=False, indent=2))
     elif args.command == "build":
         path, report = build_index(args.products_dir, timing_callback=timing.callback)

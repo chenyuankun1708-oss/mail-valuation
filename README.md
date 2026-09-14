@@ -148,6 +148,16 @@ python app.py refresh
 
 所有 `python app.py ...` 命令都会在运行时显示当前步骤，结束后显示分类和总耗时。业务结果JSON继续写入stdout，计时信息单独写入stderr，因此原有JSON管道仍可使用。`refresh`会分别统计邮件与文件、数据库与缓存、数据计算和网页更新；手工运行 `powershell -ExecutionPolicy Bypass -File .\scripts\refresh.ps1` 时可实时查看进度，每天18:30计划任务也会把分步计时、脚本总耗时和退出码写入被Git忽略的 `logs/refresh.log`。耗时采用单调时钟测量，只用于运行观察。
 
+`scripts/refresh.ps1`会在活动日志达到50MB或跨月时先压缩并校验，再轮转日志，最多保留30份。刷新成功后若已配置`BACKUP_DIR`，会自动创建按SHA-256内容去重的业务数据快照；`.env`、普通运行日志、`.runtime`和可重建行情缓存不会进入备份。
+
+```powershell
+python app.py backup
+python app.py backup-check
+python app.py backup-restore --snapshot <快照ID> --target <不存在或为空的目录>
+```
+
+默认本机配置使用`D:\FOF-backups`并保留30个快照。恢复命令永远不会覆盖现有项目，只将已校验内容恢复至独立空目录；正式替换前应人工核对。该目录与项目同在D盘，只能防误删，不能防范整块磁盘故障。
+
 启动仅监听本机回环地址、使用 `.env` 用户名和密码保护的分享服务：
 
 ```powershell
