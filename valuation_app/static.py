@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
 
 from .config import PRODUCTS, TOP_PRODUCT_IDS
@@ -114,6 +115,17 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
     except (OSError, ValueError):
         strategy_lab = {}
     knowledge_path = os.path.join(root, "knowledge_base", "knowledge.sqlite3")
+    otc_path = os.path.join(root, "otc_derivatives_data", "otc.sqlite3")
+    otc_product_count = 0
+    if os.path.exists(otc_path):
+        try:
+            connection = sqlite3.connect("file:%s?mode=ro" % otc_path.replace("\\", "/"), uri=True)
+            try:
+                otc_product_count = connection.execute("SELECT COUNT(*) FROM otc_products").fetchone()[0]
+            finally:
+                connection.close()
+        except sqlite3.Error:
+            otc_product_count = 0
     module_status = {
         "valuations": {"name": "估值", "status": "current" if dates else "missing",
                        "data_cutoff": max(dates) if dates else None,
@@ -137,13 +149,12 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
                          "data_cutoff": strategy_lab.get("generated_at"),
                          "source_count": len(strategy_lab.get("recommendations") or []),
                          "warnings": 0},
-        "otc_backtest": {"name": "场外衍生品回测",
+        "otc_backtest": {"name": "场外衍生品",
                          "status": "current" if all((benchmark_payload.get("indices") or {}).get(code)
-                                                    for code in ("000852.SH", "000905.SH", "000300.SH"))
+                                                    for code in ("000852", "000905", "000300"))
                          else "missing",
                          "data_cutoff": benchmark_payload.get("updated_at"),
-                         "source_count": sum(1 for code in ("000852.SH", "000905.SH", "000300.SH")
-                                             if (benchmark_payload.get("indices") or {}).get(code)),
+                         "source_count": otc_product_count,
                          "warnings": 0},
     }
     payload = {"products": list(grouped.values()), "parse_errors": safe_parse_errors, "ledger_errors": ledger_errors,

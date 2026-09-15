@@ -15,7 +15,7 @@ import tempfile
 SCHEMA_VERSION = 1
 DEFAULT_RETENTION = 30
 SOURCE_DIRECTORIES = ("products", "底层资产", "data_sources", "knowledge_base")
-OPTIONAL_DIRECTORIES = (os.path.join("strategy_lab_data", "llm_runs"),)
+OPTIONAL_DIRECTORIES = (os.path.join("strategy_lab_data", "llm_runs"), "otc_derivatives_data")
 SOURCE_FILES = ("专户资金台账.xlsx", "产品标签.xlsx", "管理人清单.xlsx", "碳排放价格.xlsx")
 AUDIT_FILES = (os.path.join("logs", "label-audit.jsonl"),)
 SNAPSHOT_RE = re.compile(r"^snapshot-\d{8}T\d{6}(?:-\d+)?\.json$")

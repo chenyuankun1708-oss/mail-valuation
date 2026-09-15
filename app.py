@@ -18,6 +18,8 @@ from valuation_app.factors import update_cache as update_factor_cache
 from valuation_app.mail import download_valuations
 from valuation_app.labels import migrate_catalog
 from valuation_app.knowledge import KnowledgeStore
+from valuation_app.otc_ledger import migrate_workbook as migrate_otc_ledger
+from valuation_app.otc_store import OtcStore
 from valuation_app.organize import organize_products
 from valuation_app.parser import scan_valuations
 from valuation_app.static import build_index
@@ -94,7 +96,7 @@ def refresh_output(result):
 def main():
     load_dotenv()
     parser = argparse.ArgumentParser(description="从邮件估值表计算单一投资人的收益与收益率")
-    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "strategy-lab", "portfolio-var", "labels-migrate", "knowledge-add", "knowledge-import", "knowledge-check", "knowledge-reindex", "knowledge-export", "backup", "backup-check", "backup-restore", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
+    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "strategy-lab", "portfolio-var", "labels-migrate", "otc-ledger-migrate", "knowledge-add", "knowledge-import", "knowledge-check", "knowledge-reindex", "knowledge-export", "backup", "backup-check", "backup-restore", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
     parser.add_argument("--products-dir", default="products")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -106,6 +108,7 @@ def main():
     parser.add_argument("--backup-root", help="备份仓库；默认读取BACKUP_DIR")
     parser.add_argument("--snapshot", help="备份快照ID；默认使用最新快照")
     parser.add_argument("--target", help="backup-restore恢复到不存在或为空的目录")
+    parser.add_argument("--source", help="otc-ledger-migrate只读迁移的源工作簿")
     args = parser.parse_args()
     timing = TimingRecorder()
     atexit.register(timing.print_summary)
@@ -179,6 +182,14 @@ def main():
                           "revision": result["revision"],
                           "record_count": len(result["records"]),
                           "updated_at": result["updated_at"]}, ensure_ascii=False, indent=2))
+    elif args.command == "otc-ledger-migrate":
+        if not args.source:
+            parser.error("otc-ledger-migrate必须提供--source")
+        with timing.step("场外衍生品产品簿记迁移", "命令执行"):
+            root = os.path.abspath(os.path.dirname(args.products_dir))
+            result = migrate_otc_ledger(OtcStore(root), args.source)
+        print(json.dumps({key: value for key, value in result.items() if key != "products"},
+                         ensure_ascii=False, indent=2))
     elif args.command.startswith("knowledge-"):
         store = KnowledgeStore(args.knowledge_root)
         with timing.step("本地知识库维护", "命令执行"):

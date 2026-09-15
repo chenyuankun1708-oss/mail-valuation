@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 from .mail import load_env
 from .labels import LabelConflictError, build_label_payload, mutate_catalog
 from .bottom_returns import analyze_bottom_return
-from .otc_store import OtcStore, TaskConflictError
+from .otc_store import OtcStore, RevisionConflictError, TaskConflictError
 from . import api_v2
 
 
@@ -439,6 +439,15 @@ def make_handler(index_path, user, password, limiter=None):
                 raise ValueError("分页参数超出允许范围")
             return page, page_size
 
+        def _otc_product_query(self):
+            query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+            allowed = {"page", "page_size", "q", "structure", "index_code", "status", "start_from", "start_to"}
+            if set(query) - allowed or any(len(values) != 1 for values in query.values()):
+                raise ValueError("仅接受固定产品筛选参数")
+            page = int(query.pop("page", ["1"])[0]); page_size = int(query.pop("page_size", ["50"])[0])
+            filters = {key: values[0] for key, values in query.items() if values[0]}
+            return page, page_size, filters
+
         def _serve_otc_get(self, route, include_body=True):
             if not self._authenticate():
                 return
@@ -449,6 +458,14 @@ def make_handler(index_path, user, password, limiter=None):
                 if route == "/api/otc/backtests":
                     page, page_size = self._otc_query()
                     self._send_cached_json(otc_store.list_runs(page, page_size), include_body)
+                    return
+                if route == "/api/otc/products":
+                    page, page_size, filters = self._otc_product_query()
+                    self._send_cached_json(otc_store.list_products(page, page_size, filters), include_body)
+                    return
+                product_match = re.match(r"^/api/otc/products/([0-9a-f-]{36})$", route)
+                if product_match:
+                    self._send_cached_json({"product": otc_store.get_product(product_match.group(1))}, include_body)
                     return
                 match = re.match(r"^/api/otc/backtests/([0-9a-f-]{36})(?:/(samples|download\.xlsx|download\.json))?$", route)
                 if not match or not otc_store.valid_run_id(match.group(1)):
@@ -480,12 +497,43 @@ def make_handler(index_path, user, password, limiter=None):
                 return
             try:
                 request = self._read_json(64 * 1024)
+                if request.get("product_id"):
+                    allowed = {"product_id", "product_revision", "start_date", "end_date"}
+                    if set(request) - allowed:
+                        raise ValueError("按产品回测只接受产品ID、修订号和起止日")
+                    request = otc_store.product_backtest_request(
+                        request.get("product_id"), request.get("product_revision"), request)
                 run = otc_store.submit(request)
                 self._send_json(202, {"run": run,
                                       "poll": "/api/otc/backtests/%s" % run["id"]})
             except TaskConflictError as exc:
                 self._send_json(409, {"error": str(exc)})
             except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _mutate_otc_product(self, action, product_id=None):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json(64 * 1024)
+                if action == "create":
+                    product = otc_store.create_product(request.get("values") or {}, user)
+                    status = 201
+                elif action == "update":
+                    product = otc_store.update_product(product_id, request.get("values") or {},
+                                                       request.get("expected_revision"), user)
+                    status = 200
+                elif action == "event":
+                    product = otc_store.add_event(product_id, request, user); status = 201
+                else:
+                    product = otc_store.void_product(product_id, request.get("expected_revision"), user)
+                    status = 200
+                self._send_json(status, {"product": product})
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except RevisionConflictError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except (ValueError, TypeError, sqlite3.Error) as exc:
                 self._send_json(400, {"error": str(exc)})
 
         def _serve_versioned_asset(self, route, include_body=True):
@@ -863,7 +911,7 @@ def make_handler(index_path, user, password, limiter=None):
         def do_GET(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
-            if route == "/api/modules/otc-derivatives" or route == "/api/otc/backtests" or route.startswith("/api/otc/backtests/"):
+            if route == "/api/modules/otc-derivatives" or route in ("/api/otc/backtests", "/api/otc/products") or route.startswith("/api/otc/backtests/") or route.startswith("/api/otc/products/"):
                 self._serve_otc_get(route)
             elif route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
                 self._serve_v2(route)
@@ -910,8 +958,14 @@ def make_handler(index_path, user, password, limiter=None):
                 self._serve(True)
 
         def do_POST(self):
-            if urlsplit(self.path).path == "/api/otc/backtests":
+            route = urlsplit(self.path).path
+            event_match = re.match(r"^/api/otc/products/([0-9a-f-]{36})/events$", route)
+            if route == "/api/otc/backtests":
                 self._submit_otc_backtest()
+            elif route == "/api/otc/products":
+                self._mutate_otc_product("create")
+            elif event_match:
+                self._mutate_otc_product("event", event_match.group(1))
             elif urlsplit(self.path).path == "/api/labels":
                 self._mutate_labels("create")
             elif urlsplit(self.path).path == "/api/strategy-lab/llm":
@@ -931,6 +985,10 @@ def make_handler(index_path, user, password, limiter=None):
 
         def do_PATCH(self):
             route = urlsplit(self.path).path
+            otc_match = re.match(r"^/api/otc/products/([0-9a-f-]{36})$", route)
+            if otc_match:
+                self._mutate_otc_product("update", otc_match.group(1))
+                return
             knowledge_prefix = "/api/knowledge/"
             knowledge_id = route[len(knowledge_prefix):] if route.startswith(knowledge_prefix) else ""
             if knowledge_id.isdigit():
@@ -945,6 +1003,10 @@ def make_handler(index_path, user, password, limiter=None):
 
         def do_DELETE(self):
             route = urlsplit(self.path).path
+            otc_match = re.match(r"^/api/otc/products/([0-9a-f-]{36})$", route)
+            if otc_match:
+                self._mutate_otc_product("void", otc_match.group(1))
+                return
             knowledge_prefix = "/api/knowledge/"
             knowledge_id = route[len(knowledge_prefix):] if route.startswith(knowledge_prefix) else ""
             if knowledge_id.isdigit():
@@ -960,7 +1022,7 @@ def make_handler(index_path, user, password, limiter=None):
         def do_HEAD(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
-            if route == "/api/modules/otc-derivatives" or route == "/api/otc/backtests" or route.startswith("/api/otc/backtests/"):
+            if route == "/api/modules/otc-derivatives" or route in ("/api/otc/backtests", "/api/otc/products") or route.startswith("/api/otc/backtests/") or route.startswith("/api/otc/products/"):
                 self._serve_otc_get(route, False)
             elif route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
                 self._serve_v2(route, False)

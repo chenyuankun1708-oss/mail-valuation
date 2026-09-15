@@ -46,6 +46,19 @@ class BackupTest(unittest.TestCase):
         self.assertEqual(connection.execute("select value from sample").fetchone()[0], "kept")
         connection.close()
 
+    def test_otc_runtime_database_is_backed_up_consistently(self):
+        otc = os.path.join(self.project, "otc_derivatives_data")
+        os.makedirs(otc)
+        connection = sqlite3.connect(os.path.join(otc, "otc.sqlite3"))
+        connection.execute("create table products(name text)")
+        connection.execute("insert into products values ('发行产品')")
+        connection.commit(); connection.close()
+        snapshot = create_backup(self.project, self.backup)
+        with open(os.path.join(self.backup, "snapshots", snapshot["snapshot_id"] + ".json"),
+                  encoding="utf-8") as handle:
+            paths = [item["path"] for item in json.load(handle)["files"]]
+        self.assertIn("otc_derivatives_data/otc.sqlite3", paths)
+
     def test_tamper_is_detected_and_nonempty_restore_is_rejected(self):
         result = create_backup(self.project, self.backup)
         manifest_path = os.path.join(self.backup, "snapshots", result["snapshot_id"] + ".json")

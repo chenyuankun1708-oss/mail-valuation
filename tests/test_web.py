@@ -174,6 +174,33 @@ class ShareServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"otcLoaded", asset)
 
+    def test_otc_ledger_crud_is_authenticated_revisioned_and_soft_deleted(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        values = {"name": "网页发行", "strategy_name": "DCN", "structure": "dcn",
+                  "index_code": "000852", "notional": 10000000, "start_date": "2026-01-02",
+                  "terms": {}, "reference": {}, "notes": ""}
+        status, _, body = self.request(token, path="/api/otc/products", method="POST",
+                                       body=json.dumps({"values": values}).encode("utf-8"))
+        self.assertEqual(status, 201); product = json.loads(body)["product"]
+        product_id = product["id"]
+        status, _, body = self.request(token, path="/api/otc/products/%s" % product_id)
+        self.assertEqual(status, 200)
+        event = {"event_type": "生效", "event_date": "2026-01-02", "values": {"note": "人工"},
+                 "expected_revision": product["revision"]}
+        status, _, body = self.request(token, path="/api/otc/products/%s/events" % product_id,
+                                       method="POST", body=json.dumps(event).encode("utf-8"))
+        self.assertEqual(status, 201); active = json.loads(body)["product"]
+        self.assertEqual(active["status"], "存续")
+        stale = {"values": {"notes": "冲突"}, "expected_revision": 1}
+        self.assertEqual(self.request(token, path="/api/otc/products/%s" % product_id,
+                                      method="PATCH", body=json.dumps(stale).encode("utf-8"))[0], 409)
+        deletion = json.dumps({"expected_revision": active["revision"]}).encode("utf-8")
+        status, _, body = self.request(token, path="/api/otc/products/%s" % product_id,
+                                       method="DELETE", body=deletion)
+        self.assertEqual(status, 200); self.assertEqual(json.loads(body)["product"]["status"], "已作废")
+        self.assertEqual(self.request(path="/api/otc/products")[0], 401)
+        self.assertEqual(self.request(token, path="/api/otc/products?unknown=x")[0], 400)
+
     def test_v2_parameter_whitelists_pagination_and_path_traversal(self):
         token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
         base = "/api/v2/overview?start=2026-01-01&end=2026-02-01&scope=all"

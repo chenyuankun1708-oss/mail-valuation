@@ -268,6 +268,7 @@ class StaticCalculationTest(unittest.TestCase):
         self.assertIn("迁移后Excel只作为历史备份", HTML)
         self.assertIn("迁移记录中原管理人清单来源优先", HTML)
         self.assertIn("python app.py labels-migrate", HTML)
+        self.assertIn("python app.py otc-ledger-migrate", HTML)
 
     def test_online_label_editor_updates_dependent_views(self):
         self.assertIn("async function openLabelEditor()", HTML)
