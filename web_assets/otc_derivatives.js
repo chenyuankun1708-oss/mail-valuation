@@ -5,6 +5,8 @@ function installOtcNavigation(){
  if(risk&&!document.querySelector('.dash-nav[data-page="otc-derivatives"]'))risk.insertAdjacentHTML('beforebegin','<button class="dash-nav" data-page="otc-derivatives" onclick="dashGo(\'otc-derivatives\',false,\'backtest\')"><i>⌁</i><span>场外衍生品</span></button>');
  const content=document.querySelector('.dash-content');
  if(content&&!document.getElementById('dashViewotc-derivatives'))content.insertAdjacentHTML('beforeend','<section class="dash-view" data-page="otc-derivatives" id="dashViewotc-derivatives"><div id="dashOtcDerivatives"></div></section>');
+ const view=document.getElementById('dashViewotc-derivatives');
+ if(view&&!document.getElementById('dashOtcDerivatives'))view.insertAdjacentHTML('beforeend','<div id="dashOtcDerivatives"></div>');
  documentOtcChange();
 }
 

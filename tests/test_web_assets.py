@@ -20,6 +20,12 @@ class WebAssetSourceTest(unittest.TestCase):
         self.assertIn("#home", static.HTML)
         self.assertIn("function renderOtcDerivatives", static.OTC_DERIVATIVES_JS)
 
+    def test_otc_view_always_has_a_render_mount(self):
+        self.assertIn("k==='otc-derivatives'?'<div id=dashOtcDerivatives></div>'",
+                      static.DASHBOARD_JS)
+        self.assertIn("if(view&&!document.getElementById('dashOtcDerivatives'))",
+                      static.OTC_DERIVATIVES_JS)
+
     def test_bootstrap_defers_full_payload_on_home_and_preserves_deep_links(self):
         root = os.path.dirname(os.path.dirname(__file__))
         with open(os.path.join(root, "web_assets", "bootstrap.js"),
