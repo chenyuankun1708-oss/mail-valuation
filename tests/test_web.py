@@ -93,6 +93,15 @@ class ShareServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"refreshed atomically", body)
 
+    def test_health_endpoint_identifies_running_server_code(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        self.assertEqual(self.request(path="/api/health")[0], 401)
+        status, _, body = self.request(token, path="/api/health")
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["status"], "ok")
+        self.assertRegex(payload["server_code_sha256"], r"^[0-9a-f]{64}$")
+
     def test_create_server_refuses_a_duplicate_listener(self):
         env_path = os.path.join(self.tempdir.name, ".env")
         with open(env_path, "w", encoding="utf-8") as output:

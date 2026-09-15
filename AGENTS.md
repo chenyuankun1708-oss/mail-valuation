@@ -23,6 +23,7 @@
 - 公网分享默认使用Tailscale Funnel固定`*.ts.net`地址，Python服务仍只监听`127.0.0.1`并保留Basic Auth；开机任务必须以最高权限调用`start_tailscale_share.ps1`，确保能够访问本机Tailscale受保护管道，Cloudflare Quick Tunnel仅作临时备用。不得把含财务数据的网页发布到公开GitHub Pages；分享地址和运行日志继续由Git忽略。
 - 分享启动不得仅凭端口返回401判断网页版本可用，必须使用Basic Auth校验当前`/api/v2/bootstrap`及资源路由；默认端口若被旧版或无关进程占用，应在有限的本机回环备用端口内启动当前版本并重定向固定Funnel。Windows网页服务必须使用独占端口绑定，存在`.venv`时启动脚本优先使用其Python解释器，禁止让新旧服务共同监听同一端口。
 - `start_tailscale_share.ps1`发现Tailscale重启后尚未进入Running状态时，必须先自动启动本机`tailscale-ipn.exe`并等待一次恢复，再决定是否报错；不得改变固定域名或绕过登录状态。
+- 固定分享启动脚本必须通过受Basic Auth保护的健康接口核对当前`valuation_app/web.py`的SHA-256，不能只凭端口开放、401或可读取旧版摘要判断服务为当前版本；旧进程占用端口时须在有限回环备用端口启动当前代码并重定向固定Tailscale地址。
 - 网页发布采用轻量入口HTML与受Basic Auth保护的只读数据接口；首屏JSON、脚本及按页面延迟加载的市场研究、多因子、底层资产、台账/标签工作簿和风控日报VaR模块必须启用gzip、ETag及私有缓存。模块路由只能使用代码登记的固定白名单，不得接受任意路径或文件名；访客浏览器不得直连Wind、RQData或邮箱。
 - 网页HTML、CSS及JavaScript必须在`web_assets`分文件维护，不得重新嵌入Python巨型字符串或使用字符串替换补丁链拼装功能。每次构建使用`page_updated_at`生成不可变版本资源，资源全部完成后原子切换入口；固定资源路由继续受Basic Auth及白名单保护。
 - 拆分后的基础脚本不得在驾驶舱依赖加载前执行首次组合计算；首次计算必须等待组合分组函数可用，并保证投资总览的组织分组汇总在首次进入时已有内容，不得依赖用户再次点击“重新计算”。

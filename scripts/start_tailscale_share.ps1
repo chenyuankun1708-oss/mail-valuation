@@ -62,9 +62,10 @@ function Test-PortOpen([int]$LocalPort) {
 
 function Test-CurrentLocalShare([int]$LocalPort, [hashtable]$Headers) {
     try {
-        $Response = Invoke-WebRequest -Uri ("http://127.0.0.1:{0}/api/v2/bootstrap" -f $LocalPort) `
+        $Response = Invoke-WebRequest -Uri ("http://127.0.0.1:{0}/api/health" -f $LocalPort) `
             -Headers $Headers -UseBasicParsing -TimeoutSec 5
-        return $Response.StatusCode -eq 200 -and $Response.Content -match '"navigation"'
+        $ExpectedHash = (Get-FileHash -LiteralPath (Join-Path $ProjectRoot 'valuation_app\web.py') -Algorithm SHA256).Hash.ToLowerInvariant()
+        return $Response.StatusCode -eq 200 -and $Response.Content -match ('"server_code_sha256"\s*:\s*"{0}"' -f $ExpectedHash)
     }
     catch { return $false }
 }

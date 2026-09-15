@@ -217,6 +217,8 @@ def make_handler(index_path, user, password, limiter=None):
         "bottom-returns": "bottom-returns.json",
     }
     expected = "Basic " + base64.b64encode((user + ":" + password).encode("utf-8")).decode("ascii")
+    with open(__file__, "rb") as source_handle:
+        server_code_sha256 = hashlib.sha256(source_handle.read()).hexdigest()
 
     class Handler(BaseHTTPRequestHandler):
         def _client_key(self):
@@ -911,7 +913,10 @@ def make_handler(index_path, user, password, limiter=None):
         def do_GET(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
-            if route == "/api/modules/otc-derivatives" or route in ("/api/otc/backtests", "/api/otc/products") or route.startswith("/api/otc/backtests/") or route.startswith("/api/otc/products/"):
+            if route == "/api/health":
+                if self._authenticate():
+                    self._send_json(200, {"status": "ok", "server_code_sha256": server_code_sha256})
+            elif route == "/api/modules/otc-derivatives" or route in ("/api/otc/backtests", "/api/otc/products") or route.startswith("/api/otc/backtests/") or route.startswith("/api/otc/products/"):
                 self._serve_otc_get(route)
             elif route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
                 self._serve_v2(route)
@@ -1022,7 +1027,10 @@ def make_handler(index_path, user, password, limiter=None):
         def do_HEAD(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
-            if route == "/api/modules/otc-derivatives" or route in ("/api/otc/backtests", "/api/otc/products") or route.startswith("/api/otc/backtests/") or route.startswith("/api/otc/products/"):
+            if route == "/api/health":
+                if self._authenticate():
+                    self._send_json(200, {"status": "ok", "server_code_sha256": server_code_sha256}, False)
+            elif route == "/api/modules/otc-derivatives" or route in ("/api/otc/backtests", "/api/otc/products") or route.startswith("/api/otc/backtests/") or route.startswith("/api/otc/products/"):
                 self._serve_otc_get(route, False)
             elif route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
                 self._serve_v2(route, False)
