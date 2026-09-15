@@ -67,6 +67,15 @@ def _credentials(env_path):
     return user, password
 
 
+def _system_docs_credentials(env_path):
+    env = load_env(env_path)
+    user = os.environ.get("SYSTEM_QA_USER", env.get("SYSTEM_QA_USER", "")).strip()
+    password = os.environ.get("SYSTEM_QA_PASSWORD", env.get("SYSTEM_QA_PASSWORD", ""))
+    if not user or not password:
+        raise RuntimeError("未配置 SYSTEM_QA_USER 和 SYSTEM_QA_PASSWORD")
+    return user, password
+
+
 class LLMTaskManager:
     """策略实验室 LLM 生成任务：内存存储 + 单工作线程。
 
@@ -194,7 +203,8 @@ def _llm_root():
 _LLM_METHODOLOGIES = ("risk_parity_score", "momentum_tilt", "value_tilt", "defensive")
 
 
-def make_handler(index_path, user, password, limiter=None):
+def make_handler(index_path, user, password, limiter=None,
+                 system_docs_user=None, system_docs_password=None):
     index_path = os.path.abspath(index_path)
     limiter = limiter or AuthLimiter()
     report_lock = threading.Lock()
@@ -217,6 +227,7 @@ def make_handler(index_path, user, password, limiter=None):
         "bottom-returns": "bottom-returns.json",
     }
     expected = "Basic " + base64.b64encode((user + ":" + password).encode("utf-8")).decode("ascii")
+    system_docs_limiter = AuthLimiter(max_failures=5, window_seconds=900)
     with open(__file__, "rb") as source_handle:
         server_code_sha256 = hashlib.sha256(source_handle.read()).hexdigest()
 
@@ -385,6 +396,51 @@ def make_handler(index_path, user, password, limiter=None):
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
+
+        def _serve_system_docs(self):
+            if not self._authenticate():
+                return
+            client = self._client_key()
+            if system_docs_limiter.blocked(client):
+                self._send_json(429, {"error": "系统文档登录失败次数过多，请稍后重试"})
+                return
+            try:
+                request = self._read_json(max_length=4096)
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            if not system_docs_user or system_docs_password is None:
+                self._send_json(503, {"error": "系统文档独立账号尚未配置"})
+                return
+            supplied_user = str(request.get("username") or "")
+            supplied_password = str(request.get("password") or "")
+            valid = (hmac.compare_digest(supplied_user, system_docs_user) and
+                     hmac.compare_digest(supplied_password, system_docs_password))
+            if not valid:
+                system_docs_limiter.failed(client)
+                self._send_json(403, {"error": "系统文档账号或密码错误"})
+                return
+            system_docs_limiter.succeeded(client)
+            document = str(request.get("document") or "")
+            root = os.path.dirname(index_path)
+            try:
+                if document == "history":
+                    path = os.path.join(root, "logs", "CHANGELOG.md")
+                    with open(path, "r", encoding="utf-8") as handle:
+                        payload = {"document": "history", "title": "历史改动",
+                                   "format": "text", "content": handle.read()}
+                elif document == "qa":
+                    path = os.path.join(root, "web_assets", "system_qa.json")
+                    with open(path, "r", encoding="utf-8") as handle:
+                        payload = {"document": "qa", "title": "系统QA",
+                                   "format": "qa", "content": json.load(handle)}
+                else:
+                    self._send_json(400, {"error": "系统文档类型不在白名单"})
+                    return
+            except (OSError, ValueError, TypeError) as exc:
+                self._send_json(503, {"error": "系统文档读取失败：%s" % type(exc).__name__})
+                return
+            self._send_json(200, payload)
 
         def _send_cached_json(self, payload, include_body=True):
             raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -965,7 +1021,9 @@ def make_handler(index_path, user, password, limiter=None):
         def do_POST(self):
             route = urlsplit(self.path).path
             event_match = re.match(r"^/api/otc/products/([0-9a-f-]{36})/events$", route)
-            if route == "/api/otc/backtests":
+            if route == "/api/system-docs/access":
+                self._serve_system_docs()
+            elif route == "/api/otc/backtests":
                 self._submit_otc_backtest()
             elif route == "/api/otc/products":
                 self._mutate_otc_product("create")
@@ -1079,8 +1137,11 @@ def create_server(index_path="index.html", host="127.0.0.1", port=8000, env_path
     if host not in ("127.0.0.1", "localhost"):
         raise ValueError("分享服务只允许绑定127.0.0.1")
     user, password = _credentials(env_path)
+    system_docs_user, system_docs_password = _system_docs_credentials(env_path)
     return _ExclusiveThreadingHTTPServer(("127.0.0.1", port),
-                                         make_handler(index_path, user, password))
+                                         make_handler(index_path, user, password,
+                                                      system_docs_user=system_docs_user,
+                                                      system_docs_password=system_docs_password))
 
 
 def serve(index_path="index.html", host="127.0.0.1", port=8000, open_browser=True, env_path=".env",

@@ -8,7 +8,7 @@ class WebAssetSourceTest(unittest.TestCase):
     def test_frontend_sources_are_split_without_patch_chains(self):
         root = os.path.dirname(os.path.dirname(__file__))
         for name in ("shell.html", "styles.css", "bootstrap.js", "core.js", "dashboard.js",
-                     "otc_derivatives.js"):
+                     "otc_derivatives.js", "system_qa.json"):
             self.assertTrue(os.path.isfile(os.path.join(root, "web_assets", name)))
         with open(static.__file__, encoding="utf-8") as handle:
             source = handle.read()
@@ -19,6 +19,8 @@ class WebAssetSourceTest(unittest.TestCase):
         self.assertIn("const DASH_PAGES=", static.DASHBOARD_JS)
         self.assertIn("#home", static.HTML)
         self.assertIn("function renderOtcDerivatives", static.OTC_DERIVATIVES_JS)
+        self.assertIn("openProtectedSystemDoc('qa')", static.CORE_JS)
+        self.assertIn("'历史改动','系统QA'", static.CORE_JS)
 
     def test_otc_view_always_has_a_render_mount(self):
         self.assertIn("k==='otc-derivatives'?'<div id=dashOtcDerivatives></div>'",

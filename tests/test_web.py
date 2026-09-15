@@ -53,9 +53,19 @@ class ShareServerTest(unittest.TestCase):
         with open(os.path.join(sources, "product_labels.json"), "w", encoding="utf-8") as output:
             json.dump({"schema_version": 1, "revision": 1, "updated_at": "2026-09-07",
                        "records": []}, output)
+        logs = os.path.join(self.tempdir.name, "logs")
+        os.makedirs(logs)
+        with open(os.path.join(logs, "CHANGELOG.md"), "w", encoding="utf-8") as output:
+            output.write("# 历史改动\n\n- 测试变更\n")
+        web_assets = os.path.join(self.tempdir.name, "web_assets")
+        os.makedirs(web_assets)
+        with open(os.path.join(web_assets, "system_qa.json"), "w", encoding="utf-8") as output:
+            json.dump({"schema_version": 1, "items": [{"question": "如何更新？", "answer": ["运行refresh"]}]}, output)
         limiter = AuthLimiter(max_failures=2, window_seconds=60)
         self.server = ThreadingHTTPServer(("127.0.0.1", 0),
-                                          make_handler(self.index_path, "viewer", "long-password", limiter))
+                                          make_handler(self.index_path, "viewer", "long-password", limiter,
+                                                       system_docs_user="test-doc-user",
+                                                       system_docs_password="test-doc-password"))
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.daemon = True
         self.thread.start()
@@ -102,10 +112,31 @@ class ShareServerTest(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertRegex(payload["server_code_sha256"], r"^[0-9a-f]{64}$")
 
+    def test_system_docs_require_independent_credentials(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        path = "/api/system-docs/access"
+        valid = json.dumps({"username": "test-doc-user", "password": "test-doc-password",
+                            "document": "qa"}).encode("utf-8")
+        self.assertEqual(self.request(path=path, method="POST", body=valid)[0], 401)
+        invalid = json.dumps({"username": "test-doc-user", "password": "wrong",
+                              "document": "qa"}).encode("utf-8")
+        self.assertEqual(self.request(token, path=path, method="POST", body=invalid)[0], 403)
+        status, headers, body = self.request(token, path=path, method="POST", body=valid)
+        self.assertEqual(status, 200)
+        payload = json.loads(body.decode("utf-8"))
+        self.assertEqual(payload["document"], "qa")
+        self.assertIn("如何更新", payload["content"]["items"][0]["question"])
+        history = json.dumps({"username": "test-doc-user", "password": "test-doc-password",
+                              "document": "history"}).encode("utf-8")
+        status, _, body = self.request(token, path=path, method="POST", body=history)
+        self.assertEqual(status, 200)
+        self.assertIn("测试变更", json.loads(body.decode("utf-8"))["content"])
+        self.assertNotIn(b"test-doc-password", body)
+
     def test_create_server_refuses_a_duplicate_listener(self):
         env_path = os.path.join(self.tempdir.name, ".env")
         with open(env_path, "w", encoding="utf-8") as output:
-            output.write("SHARE_USER=viewer\nSHARE_PASSWORD=long-password\n")
+            output.write("SHARE_USER=viewer\nSHARE_PASSWORD=long-password\nSYSTEM_QA_USER=test-doc-user\nSYSTEM_QA_PASSWORD=test-doc-password\n")
         first = create_server(self.index_path, port=0, env_path=env_path)
         port = first.server_address[1]
         try:

@@ -165,7 +165,7 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
                "factors": factor_page_payload(), "market_research": market_research_page_payload(),
                "strategy_lab": strategy_lab,
                "module_status": module_status,
-               "documentation": {"help": HELP_DATA, "history": HISTORY_DATA},
+               "documentation": {"help": HELP_DATA},
                "default_start": "2026-06-30" if "2026-06-30" in dates else min(dates), "default_end": max(dates)}
     build_analysis_database(analysis_path, payload["products"], payload["page_updated_at"],
                             source_records.values())

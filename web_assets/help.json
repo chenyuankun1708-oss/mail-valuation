@@ -2,6 +2,11 @@
   "schema_version": 1,
   "sections": [
     {
+      "id": "protected-system-docs",
+      "title": "历史改动与系统QA访问",
+      "summary": "数据与说明中的历史改动和系统QA使用独立于主站Basic Auth的第二层账号验证。凭据只从本机.env读取，不进入网页脚本、接口响应、日志或Git；接口只允许history和qa两类固定文档，连续失败会被临时限流。"
+    },
+    {
       "id": "otc-view-initialization",
       "title": "场外衍生品页面加载",
       "summary": "场外衍生品页面在驾驶舱初始化时创建固定内容挂载点，延迟模块随后渲染期权回测或产品簿记；从首页、左侧导航或深链接进入均使用同一挂载点，避免只显示空白页面。"
