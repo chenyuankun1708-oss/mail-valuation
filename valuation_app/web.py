@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 from .mail import load_env
 from .labels import LabelConflictError, build_label_payload, mutate_catalog
 from .bottom_returns import analyze_bottom_return
+from .otc_store import OtcStore, TaskConflictError
 from . import api_v2
 
 
@@ -203,6 +204,7 @@ def make_handler(index_path, user, password, limiter=None):
     knowledge_lock = threading.Lock()
     llm_tasks = LLMTaskManager()
     strategy_tasks = StrategyTaskManager(os.path.dirname(index_path))
+    otc_store = OtcStore(os.path.dirname(index_path))
     asset_cache = {}
     module_files = {
         "factors": "factors.json",
@@ -409,8 +411,85 @@ def make_handler(index_path, user, password, limiter=None):
             if include_body:
                 self.wfile.write(body)
 
+        def _serve_download(self, path, filename, content_type, include_body=True):
+            try:
+                with open(path, "rb") as handle:
+                    body = handle.read()
+            except OSError:
+                self._send_json(404, {"error": "下载文件不存在"})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''%s" % quote(filename))
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            if include_body:
+                self.wfile.write(body)
+
+        def _otc_query(self):
+            parsed = urlsplit(self.path)
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            if set(query) - {"page", "page_size"} or any(len(values) != 1 for values in query.values()):
+                raise ValueError("仅接受固定分页参数")
+            page = int(query.get("page", ["1"])[0])
+            page_size = int(query.get("page_size", ["20"])[0])
+            if page < 1 or page_size < 20 or page_size > 200:
+                raise ValueError("分页参数超出允许范围")
+            return page, page_size
+
+        def _serve_otc_get(self, route, include_body=True):
+            if not self._authenticate():
+                return
+            try:
+                if route == "/api/modules/otc-derivatives":
+                    self._send_cached_json(otc_store.module_payload(), include_body)
+                    return
+                if route == "/api/otc/backtests":
+                    page, page_size = self._otc_query()
+                    self._send_cached_json(otc_store.list_runs(page, page_size), include_body)
+                    return
+                match = re.match(r"^/api/otc/backtests/([0-9a-f-]{36})(?:/(samples|download\.xlsx|download\.json))?$", route)
+                if not match or not otc_store.valid_run_id(match.group(1)):
+                    self.send_error(404)
+                    return
+                run_id, action = match.groups()
+                if action == "samples":
+                    page, page_size = self._otc_query()
+                    self._send_cached_json(otc_store.samples(run_id, page, page_size), include_body)
+                elif action in ("download.xlsx", "download.json"):
+                    kind = "xlsx" if action.endswith("xlsx") else "json"
+                    path = otc_store.download_path(run_id, kind)
+                    content_type = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    if kind == "xlsx" else "application/json; charset=utf-8")
+                    self._serve_download(path, "期权回测_%s.%s" % (run_id, kind), content_type, include_body)
+                elif action is None:
+                    self._send_cached_json(otc_store.result(run_id), include_body)
+                else:
+                    self.send_error(404)
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+            except (OSError, sqlite3.Error) as exc:
+                self._send_json(503, {"error": "场外衍生品数据暂不可用：%s" % type(exc).__name__})
+
+        def _submit_otc_backtest(self):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json(64 * 1024)
+                run = otc_store.submit(request)
+                self._send_json(202, {"run": run,
+                                      "poll": "/api/otc/backtests/%s" % run["id"]})
+            except TaskConflictError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
         def _serve_versioned_asset(self, route, include_body=True):
-            match = re.match(r"^/assets/([0-9a-f]{16})/(styles\.css|bootstrap\.js|core\.js|dashboard\.js)$", route)
+            match = re.match(r"^/assets/([0-9a-f]{16})/(styles\.css|bootstrap\.js|core\.js|dashboard\.js|otc_derivatives\.js)$", route)
             if not match:
                 return False
             version, filename = match.groups()
@@ -784,7 +863,9 @@ def make_handler(index_path, user, password, limiter=None):
         def do_GET(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
-            if route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
+            if route == "/api/modules/otc-derivatives" or route == "/api/otc/backtests" or route.startswith("/api/otc/backtests/"):
+                self._serve_otc_get(route)
+            elif route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
                 self._serve_v2(route)
             elif route == "/api/monthly-report":
                 self._serve_monthly_report()
@@ -829,7 +910,9 @@ def make_handler(index_path, user, password, limiter=None):
                 self._serve(True)
 
         def do_POST(self):
-            if urlsplit(self.path).path == "/api/labels":
+            if urlsplit(self.path).path == "/api/otc/backtests":
+                self._submit_otc_backtest()
+            elif urlsplit(self.path).path == "/api/labels":
                 self._mutate_labels("create")
             elif urlsplit(self.path).path == "/api/strategy-lab/llm":
                 self._submit_llm_task()
@@ -877,7 +960,9 @@ def make_handler(index_path, user, password, limiter=None):
         def do_HEAD(self):
             route = urlsplit(self.path).path
             root = os.path.dirname(index_path)
-            if route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
+            if route == "/api/modules/otc-derivatives" or route == "/api/otc/backtests" or route.startswith("/api/otc/backtests/"):
+                self._serve_otc_get(route, False)
+            elif route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
                 self._serve_v2(route, False)
             elif route == "/api/page-data":
                 self._serve_asset(os.path.join(root, ".runtime", "page-data.json"),

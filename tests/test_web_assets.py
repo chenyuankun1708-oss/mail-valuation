@@ -7,7 +7,8 @@ import valuation_app.static as static
 class WebAssetSourceTest(unittest.TestCase):
     def test_frontend_sources_are_split_without_patch_chains(self):
         root = os.path.dirname(os.path.dirname(__file__))
-        for name in ("shell.html", "styles.css", "bootstrap.js", "core.js", "dashboard.js"):
+        for name in ("shell.html", "styles.css", "bootstrap.js", "core.js", "dashboard.js",
+                     "otc_derivatives.js"):
             self.assertTrue(os.path.isfile(os.path.join(root, "web_assets", name)))
         with open(static.__file__, encoding="utf-8") as handle:
             source = handle.read()
@@ -17,6 +18,7 @@ class WebAssetSourceTest(unittest.TestCase):
         self.assertIn("const RAW=__DATA__", static.CORE_JS)
         self.assertIn("const DASH_PAGES=", static.DASHBOARD_JS)
         self.assertIn("#home", static.HTML)
+        self.assertIn("function renderOtcDerivatives", static.OTC_DERIVATIVES_JS)
 
     def test_bootstrap_defers_full_payload_on_home_and_preserves_deep_links(self):
         root = os.path.dirname(os.path.dirname(__file__))
@@ -29,6 +31,7 @@ class WebAssetSourceTest(unittest.TestCase):
         self.assertIn("data/ledger", source)
         self.assertIn("overview/report", source)
         self.assertIn("aria-expanded", source)
+        self.assertIn("otc-derivatives/backtest", source)
 
     def test_initial_calculation_waits_for_dashboard_dependencies(self):
         core = static.CORE_JS

@@ -26,6 +26,7 @@ def _asset_text(name):
 STYLE = _asset_text("styles.css")
 CORE_JS = _asset_text("core.js")
 DASHBOARD_JS = _asset_text("dashboard.js")
+OTC_DERIVATIVES_JS = _asset_text("otc_derivatives.js")
 BOOTSTRAP_JS = _asset_text("bootstrap.js")
 HELP_DATA = json.loads(_asset_text("help.json"))
 HISTORY_DATA = json.loads(_asset_text("history.json"))
@@ -33,7 +34,7 @@ SHELL = _asset_text("shell.html")
 # Compatibility aggregate for calculation tests and downstream imports.
 HTML = SHELL.replace('<link rel="stylesheet" href="__STYLE_URL__">',
                      '<style>' + STYLE + '</style>').replace(
-                         '__APP_LOADER__', '<script>' + CORE_JS + DASHBOARD_JS + '</script>')
+                         '__APP_LOADER__', '<script>' + CORE_JS + OTC_DERIVATIVES_JS + DASHBOARD_JS + '</script>')
 
 
 def build_index(products_dir="products", output="index.html", year=None, month=None,
@@ -136,6 +137,14 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
                          "data_cutoff": strategy_lab.get("generated_at"),
                          "source_count": len(strategy_lab.get("recommendations") or []),
                          "warnings": 0},
+        "otc_backtest": {"name": "场外衍生品回测",
+                         "status": "current" if all((benchmark_payload.get("indices") or {}).get(code)
+                                                    for code in ("000852.SH", "000905.SH", "000300.SH"))
+                         else "missing",
+                         "data_cutoff": benchmark_payload.get("updated_at"),
+                         "source_count": sum(1 for code in ("000852.SH", "000905.SH", "000300.SH")
+                                             if (benchmark_payload.get("indices") or {}).get(code)),
+                         "warnings": 0},
     }
     payload = {"products": list(grouped.values()), "parse_errors": safe_parse_errors, "ledger_errors": ledger_errors,
                "page_updated_at": __import__("datetime").datetime.now().replace(microsecond=0).isoformat(),
@@ -195,7 +204,7 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
         payload.setdefault("risk", {})["portfolio_var"] = {}
         runtime_core = CORE_JS.replace("const RAW=__DATA__,DAY=", "const RAW=window.__FOF_DATA__,DAY=")
         runtime_dashboard = DASHBOARD_JS
-        version_seed = (payload["page_updated_at"] + STYLE + runtime_core + runtime_dashboard + BOOTSTRAP_JS).encode("utf-8")
+        version_seed = (payload["page_updated_at"] + STYLE + runtime_core + OTC_DERIVATIVES_JS + runtime_dashboard + BOOTSTRAP_JS).encode("utf-8")
         asset_version = hashlib.sha256(version_seed).hexdigest()[:16]
         asset_root = os.path.join(runtime_dir, "assets")
         os.makedirs(asset_root, exist_ok=True)
@@ -214,6 +223,7 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
         asset_manifest["files"]["styles.css"] = write_asset("styles.css", STYLE)
         asset_manifest["files"]["core.js"] = write_asset("core.js", runtime_core)
         asset_manifest["files"]["dashboard.js"] = write_asset("dashboard.js", runtime_dashboard)
+        asset_manifest["files"]["otc_derivatives.js"] = write_asset("otc_derivatives.js", OTC_DERIVATIVES_JS)
         asset_manifest["files"]["bootstrap.js"] = write_asset("bootstrap.js", BOOTSTRAP_JS)
         write_asset("manifest.json", json.dumps(asset_manifest, ensure_ascii=False, indent=2))
         if os.path.isdir(version_dir):
@@ -221,9 +231,10 @@ def build_index(products_dir="products", output="index.html", year=None, month=N
         else:
             os.replace(temporary_assets, version_dir)
         temporary_assets = None
-        loader = r'''<script>window.__FOF_ASSETS__={core:'__CORE_URL__',dashboard:'__DASHBOARD_URL__'};</script><script src="__BOOTSTRAP_URL__"></script>'''
+        loader = r'''<script>window.__FOF_ASSETS__={core:'__CORE_URL__',otc:'__OTC_URL__',dashboard:'__DASHBOARD_URL__'};</script><script src="__BOOTSTRAP_URL__"></script>'''
         prefix = "/assets/%s/" % asset_version
         loader = loader.replace("__CORE_URL__", prefix + "core.js").replace(
+            "__OTC_URL__", prefix + "otc_derivatives.js").replace(
             "__DASHBOARD_URL__", prefix + "dashboard.js").replace(
                 "__BOOTSTRAP_URL__", prefix + "bootstrap.js")
         shell = SHELL.replace("__STYLE_URL__", prefix + "styles.css").replace("__APP_LOADER__", loader)

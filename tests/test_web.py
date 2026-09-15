@@ -34,6 +34,8 @@ class ShareServerTest(unittest.TestCase):
             output.write("window.coreLoaded=true")
         with open(os.path.join(assets, "dashboard.js"), "w", encoding="utf-8") as output:
             output.write("window.dashboardLoaded=true")
+        with open(os.path.join(assets, "otc_derivatives.js"), "w", encoding="utf-8") as output:
+            output.write("window.otcLoaded=true")
         with open(os.path.join(assets, "bootstrap.js"), "w", encoding="utf-8") as output:
             output.write("window.bootstrapLoaded=true")
         modules = os.path.join(runtime, "modules")
@@ -150,6 +152,27 @@ class ShareServerTest(unittest.TestCase):
         status, _, asset = self.request(token, path="/assets/0123456789abcdef/bootstrap.js")
         self.assertEqual(status, 200)
         self.assertIn(b"bootstrapLoaded", asset)
+
+    def test_otc_module_and_backtest_routes_are_authenticated_and_bounded(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        self.assertEqual(self.request(path="/api/modules/otc-derivatives")[0], 401)
+        status, headers, body = self.request(
+            token, path="/api/modules/otc-derivatives",
+            extra_headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(status, 200)
+        self.assertIn("ETag", headers)
+        payload = json.loads(gzip.decompress(body).decode("utf-8"))
+        self.assertEqual({item["code"] for item in payload["structures"]},
+                         {"classic_snowball", "european_snowball", "dcn", "dcn_snowball_combo"})
+        invalid = json.dumps({"structure": "classic_snowball", "index_code": "000016",
+                              "start_date": "2024-01-01", "end_date": "2025-01-01"}).encode("utf-8")
+        self.assertEqual(self.request(token, path="/api/otc/backtests", method="POST", body=invalid,
+                                      extra_headers={"Content-Type": "application/json"})[0], 400)
+        self.assertEqual(self.request(token, path="/api/otc/backtests/../../secret")[0], 404)
+        self.assertEqual(self.request(token, path="/api/otc/backtests?page=1&page_size=201")[0], 400)
+        status, _, asset = self.request(token, path="/assets/0123456789abcdef/otc_derivatives.js")
+        self.assertEqual(status, 200)
+        self.assertIn(b"otcLoaded", asset)
 
     def test_v2_parameter_whitelists_pagination_and_path_traversal(self):
         token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")

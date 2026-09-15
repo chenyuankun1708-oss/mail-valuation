@@ -7,7 +7,7 @@ function loadApplication(){
  if(loading)return;loading=true;
  var home=document.getElementById('bootstrapHome');if(home)home.remove();
  document.body.classList.remove('bootstrap-ready');
- fetch('/api/page-data',{credentials:'same-origin'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){window.__FOF_DATA__=data;return loadScript(assets.core)}).then(function(){return loadScript(assets.dashboard)}).catch(function(error){loading=false;document.body.classList.add('bootstrap-ready');showError(error.message)})
+ fetch('/api/page-data',{credentials:'same-origin'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(data){window.__FOF_DATA__=data;return loadScript(assets.core)}).then(function(){return loadScript(assets.otc)}).then(function(){return loadScript(assets.dashboard)}).catch(function(error){loading=false;document.body.classList.add('bootstrap-ready');showError(error.message)})
 }
 function go(hash){location.hash=hash;if(hash!=='home')loadApplication()}
 function showError(message){var host=document.getElementById('bootstrapHome')||document.body;host.innerHTML='<div class="boot-error">看板数据加载失败，请刷新重试（'+String(message).replace(/[<>]/g,'')+'）</div>'}
@@ -16,7 +16,7 @@ function renderHome(payload){
  var groups=[
   {name:'计算收益',note:'查看总览与各层收益',links:[['总览','overview'],['FOF层','returns'],['底层','bottom-returns'],['策略层','strategy']]},
   {name:'数据管理',note:'维护标签、台账与估值表',links:[['标签','labels'],['台账','data/ledger'],['估值表','overview/report']]},
-  {name:'其他系统',note:'进入风控与研究工具',links:[['风控系统','risk'],['知识库','knowledge'],['策略实验室','lab']]}
+  {name:'其他系统',note:'进入风控与研究工具',links:[['风控系统','risk'],['知识库','knowledge'],['策略实验室','lab'],['场外衍生品','otc-derivatives/backtest']]}
  ];
  var host=document.createElement('main');host.id='bootstrapHome';host.className='boot-home';
  host.innerHTML='<button class="boot-brand" type="button">投资资产组合</button><section class="boot-welcome"><span class="boot-kicker">FOF MANAGEMENT SYSTEM</span><h1>欢迎来到FOF管理系统，想查阅什么功能？</h1><p>数据截止 '+(payload.data.data_cutoff||payload.data.default_end||'—')+' · '+payload.data.products.length+' 只顶层产品</p><div class="boot-groups">'+groups.map(function(group,index){return '<article class="boot-group"><button class="boot-category" type="button" aria-expanded="false" data-index="'+index+'"><b>'+group.name+'</b><span>'+group.note+'</span></button><div class="boot-links">'+group.links.map(function(link){return '<button type="button" data-hash="'+link[1]+'">'+link[0]+'<i>→</i></button>'}).join('')+'</div></article>'}).join('')+'</div></section>';

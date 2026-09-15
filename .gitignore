@@ -2,6 +2,7 @@
 data_sources/
 knowledge_base/
 strategy_lab_data/
+otc_derivatives_data/
 __pycache__/
 *.pyc
 .pytest_cache/
