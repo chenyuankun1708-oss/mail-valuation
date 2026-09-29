@@ -204,12 +204,24 @@ class ShareServerTest(unittest.TestCase):
         payload = json.loads(gzip.decompress(body).decode("utf-8"))
         self.assertEqual({item["code"] for item in payload["structures"]},
                          {"classic_snowball", "european_snowball", "dcn", "dcn_snowball_combo"})
+        self.assertIn("dcn_max_loss", {item["name"] for item in payload["parameter_definitions"]})
         invalid = json.dumps({"structure": "classic_snowball", "index_code": "000016",
                               "start_date": "2024-01-01", "end_date": "2025-01-01"}).encode("utf-8")
         self.assertEqual(self.request(token, path="/api/otc/backtests", method="POST", body=invalid,
                                       extra_headers={"Content-Type": "application/json"})[0], 400)
         self.assertEqual(self.request(token, path="/api/otc/backtests/../../secret")[0], 404)
         self.assertEqual(self.request(token, path="/api/otc/backtests?page=1&page_size=201")[0], 400)
+        status, _, pricing_body = self.request(token, path="/api/otc/pricing")
+        self.assertEqual(status, 200)
+        pricing = json.loads(pricing_body.decode("utf-8"))
+        self.assertEqual(pricing["model"]["structure"], "classic_snowball")
+        self.assertFalse(next(x for x in pricing["structures"] if x["code"] == "dcn")["enabled"])
+        self.assertNotIn("sha256", pricing_body.decode("utf-8").lower())
+        invalid_pricing = json.dumps({"structure": "dcn", "index_code": "000852"}).encode("utf-8")
+        self.assertEqual(self.request(token, path="/api/otc/pricing/runs", method="POST",
+                                      body=invalid_pricing,
+                                      extra_headers={"Content-Type": "application/json"})[0], 400)
+        self.assertEqual(self.request(token, path="/api/otc/pricing/runs/../../secret")[0], 404)
         status, _, asset = self.request(token, path="/assets/0123456789abcdef/otc_derivatives.js")
         self.assertEqual(status, 200)
         self.assertIn(b"otcLoaded", asset)
@@ -218,11 +230,22 @@ class ShareServerTest(unittest.TestCase):
         token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
         values = {"name": "网页发行", "strategy_name": "DCN", "structure": "dcn",
                   "index_code": "000852", "notional": 10000000, "start_date": "2026-01-02",
+                  "end_date": "2026-12-31", "legacy_annual_return": .08,
                   "terms": {}, "reference": {}, "notes": ""}
         status, _, body = self.request(token, path="/api/otc/products", method="POST",
                                        body=json.dumps({"values": values}).encode("utf-8"))
         self.assertEqual(status, 201); product = json.loads(body)["product"]
         product_id = product["id"]
+        self.assertEqual(product["end_date"], "2026-12-31")
+        aggregate = json.dumps({"product_ids": [product_id]}).encode("utf-8")
+        status, _, body = self.request(token, path="/api/otc/products/aggregate",
+                                       method="POST", body=aggregate)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["aggregates"]["count"], 1)
+        self.assertEqual(self.request(token, path="/api/otc/products?strategy_name=DCN&end_from=2026-01-01&sort_by=name&sort_dir=asc")[0], 200)
+        invalid_ids = json.dumps({"product_ids": ["../secret"]}).encode("utf-8")
+        self.assertEqual(self.request(token, path="/api/otc/products/aggregate",
+                                      method="POST", body=invalid_ids)[0], 400)
         status, _, body = self.request(token, path="/api/otc/products/%s" % product_id)
         self.assertEqual(status, 200)
         event = {"event_type": "生效", "event_date": "2026-01-02", "values": {"note": "人工"},
@@ -240,6 +263,77 @@ class ShareServerTest(unittest.TestCase):
         self.assertEqual(status, 200); self.assertEqual(json.loads(body)["product"]["status"], "已作废")
         self.assertEqual(self.request(path="/api/otc/products")[0], 401)
         self.assertEqual(self.request(token, path="/api/otc/products?unknown=x")[0], 400)
+
+    def test_otc_attachments_are_uuid_scoped_deduplicated_and_soft_deleted(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        create = json.dumps({"values": {"name": "附件接口产品", "terms": {},
+                                         "reference": {}}}, ensure_ascii=False).encode("utf-8")
+        status, _, body = self.request(token, path="/api/otc/products", method="POST", body=create)
+        self.assertEqual(status, 201)
+        product_id = json.loads(body.decode("utf-8"))["product"]["id"]
+        path = "/api/otc/products/%s/attachments" % product_id
+        upload = json.dumps({"filename": "合同.md", "category": "产品合同",
+                             "content_base64": base64.b64encode("本金1000万元".encode("utf-8")).decode("ascii")},
+                            ensure_ascii=False).encode("utf-8")
+        self.assertEqual(self.request(path=path, method="POST", body=upload)[0], 401)
+        status, _, body = self.request(token, path=path, method="POST", body=upload)
+        self.assertEqual(status, 201)
+        attachment = json.loads(body.decode("utf-8"))["attachment"]
+        status, _, body = self.request(token, path=path, method="POST", body=upload)
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body.decode("utf-8"))["duplicate"])
+        status, _, body = self.request(token, path=path)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(json.loads(body.decode("utf-8"))["attachments"]), 1)
+        detail = path + "/" + attachment["id"]
+        status, _, body = self.request(token, path=detail)
+        self.assertEqual(status, 200)
+        self.assertIn("本金1000", json.loads(body.decode("utf-8"))["attachment"]["text_content"])
+        status, headers, body = self.request(token, path=detail + "/download")
+        self.assertEqual(status, 200)
+        self.assertIn("attachment", headers["Content-Disposition"])
+        self.assertEqual(body, "本金1000万元".encode("utf-8"))
+        invalid = json.dumps({"filename": "bad.exe", "category": "产品合同",
+                              "content_base64": "eA=="}).encode("utf-8")
+        self.assertEqual(self.request(token, path=path, method="POST", body=invalid)[0], 400)
+        deletion = json.dumps({"expected_revision": attachment["revision"]}).encode("utf-8")
+        self.assertEqual(self.request(token, path=detail, method="DELETE", body=deletion)[0], 200)
+        self.assertEqual(self.request(token, path=detail)[0], 404)
+        self.assertEqual(self.request(token, path=path + "/../../secret")[0], 404)
+
+    def test_unified_llm_gateway_is_authenticated_and_disabled_without_network(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        self.assertEqual(self.request(path="/api/llm/status")[0], 401)
+        status, _, body = self.request(token, path="/api/llm/status")
+        self.assertEqual(status, 200)
+        self.assertFalse(json.loads(body.decode("utf-8"))["enabled"])
+        request = json.dumps({"task_type": "strategy_spec", "methodology": "risk_parity_score",
+                              "objective": "test"}).encode("utf-8")
+        with patch("valuation_app.llm_gateway.load_providers") as providers:
+            status, _, body = self.request(token, path="/api/llm/tasks", method="POST", body=request)
+            self.assertEqual(status, 503)
+            self.assertFalse(json.loads(body.decode("utf-8"))["enabled"])
+            providers.assert_not_called()
+        unknown = json.dumps({"task_type": "arbitrary_prompt"}).encode("utf-8")
+        self.assertEqual(self.request(token, path="/api/llm/tasks", method="POST", body=unknown)[0], 400)
+        legacy = json.dumps({"methodology": "risk_parity_score", "objective": "test"}).encode("utf-8")
+        self.assertEqual(self.request(token, path="/api/strategy-lab/llm",
+                                      method="POST", body=legacy)[0], 503)
+
+    def test_otc_parameter_template_crud_and_product_aggregates(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        request = {"structure": "classic_snowball", "index_code": "000852",
+                   "start_date": "2020-01-01", "end_date": "2026-01-01"}
+        status, _, body = self.request(token, path="/api/otc/backtest-templates", method="POST",
+                                       body=json.dumps({"name": "标准雪球", "request": request}).encode("utf-8"))
+        self.assertEqual(status, 201); template = json.loads(body)["template"]
+        status, _, body = self.request(token, path="/api/otc/backtest-templates/%s" % template["id"])
+        self.assertEqual(status, 200)
+        update = {"name": "标准雪球2", "request": request, "expected_revision": 1}
+        self.assertEqual(self.request(token, path="/api/otc/backtest-templates/%s" % template["id"],
+                                      method="PATCH", body=json.dumps(update).encode("utf-8"))[0], 200)
+        self.assertEqual(self.request(token, path="/api/otc/products?lifecycle=%s&return_state=missing" % quote("存续"))[0], 200)
+        self.assertEqual(self.request(token, path="/api/otc/backtest-templates/../../secret")[0], 404)
 
     def test_v2_parameter_whitelists_pagination_and_path_traversal(self):
         token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
@@ -395,6 +489,43 @@ class ShareServerTest(unittest.TestCase):
                                       method="DELETE", body=deactivate,
                                       extra_headers={"Content-Type": "application/json"})[0], 200)
         self.assertEqual(json.loads(self.request(token, path="/api/knowledge")[2].decode("utf-8"))["documents"], [])
+
+    def test_knowledge_source_graph_and_export_endpoints_are_fixed_and_authenticated(self):
+        token = "Basic " + base64.b64encode(b"viewer:long-password").decode("ascii")
+        self.assertEqual(self.request(path="/api/knowledge/sources")[0], 401)
+        self.assertEqual(self.request(path="/api/knowledge/facts", client="198.51.100.9")[0], 401)
+        status, _, body = self.request(token, path="/api/knowledge/sources")
+        self.assertEqual(status, 200)
+        source = json.loads(body.decode("utf-8"))["sources"][0]
+        self.assertEqual(source["id"], "wechat")
+        self.assertNotIn("root", source)
+        self.assertNotIn("path", source)
+        status, _, body = self.request(token, path="/api/knowledge/candidates?page_size=20")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body.decode("utf-8"))["items"], [])
+        status, _, body = self.request(token, path="/api/knowledge/graph?limit=20")
+        self.assertEqual(status, 200)
+        graph = json.loads(body.decode("utf-8"))
+        self.assertIn("nodes", graph)
+        self.assertIn("type_counts", graph)
+        self.assertEqual(self.request(token, path="/api/knowledge/graph?center_id=..%2Fsecret")[0], 400)
+        status, _, body = self.request(token, path="/api/knowledge/facts?page_size=20")
+        self.assertEqual(status, 200)
+        self.assertIn("fact_types", json.loads(body.decode("utf-8")))
+        self.assertEqual(self.request(token, path="/api/knowledge/facts?type=" + quote("任意字段"))[0], 400)
+        self.assertEqual(self.request(token, path="/api/knowledge/dossiers/..%2Fsecret")[0], 400)
+        invalid_batch = json.dumps({"action": "confirm", "items": []}).encode("utf-8")
+        self.assertEqual(self.request(token, path="/api/knowledge/facts/batch", method="POST",
+                                      body=invalid_batch,
+                                      extra_headers={"Content-Type": "application/json"})[0], 400)
+        status, _, body = self.request(token, path="/api/knowledge/obsidian-export", method="POST",
+                                       body=b"{}", extra_headers={"Content-Type": "application/json"})
+        self.assertEqual(status, 201)
+        export_id = json.loads(body.decode("utf-8"))["export_id"]
+        status, headers, body = self.request(token, path="/api/knowledge/exports/%s/download" % export_id)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "application/zip")
+        self.assertTrue(body.startswith(b"PK"))
 
     def test_failed_logins_are_rate_limited(self):
         client = "198.51.100.3"

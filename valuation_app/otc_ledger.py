@@ -54,15 +54,17 @@ def migrate_workbook(store, source, actor="migration"):
             reference = {"source_row": row_number, "raw_fields": raw,
                          "recent_dividend_observation": raw[7],
                          "recent_knock_out_observation": raw[10],
-                         "reported_end_date": end_date, "reported_end_value": raw[14]}
-            terms = {"term_months": int(raw[4]) if raw[4] is not None else None,
-                     "initial_level": raw[6], "dividend_level": raw[8],
-                     "monthly_dividend": raw[9], "knock_out_level": raw[11],
-                     "knock_out_coupon_raw": raw[12], "knock_in_raw": raw[13]}
+                         "reported_end_date": end_date, "reported_end_value": raw[14],
+                         "legacy_terms": {"initial_level": raw[6], "dividend_level": raw[8],
+                         "monthly_dividend": raw[9], "knock_out_level": raw[11],
+                         "knock_out_coupon_raw": raw[12], "knock_in_raw": raw[13]}}
+            terms = {"term_months": int(raw[4])} if raw[4] is not None else {}
             rows.append({"source_row": row_number, "status": status, "values": {
                 "name": raw[0], "strategy_name": raw[1], "structure": None,
                 "index_code": index_code, "notional": float(raw[3]) * 10000 if raw[3] is not None else None,
                 "start_date": _date(raw[5]), "terms": terms, "reference": reference,
+                "end_date": end_date,
+                "legacy_annual_return": float(raw[16]) if raw[16] not in (None, "", "--") else None,
                 "notes": str(raw[17] or "").strip() or None}})
     finally:
         workbook.close()

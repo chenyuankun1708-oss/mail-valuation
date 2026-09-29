@@ -1,0 +1,219 @@
+{
+  "schema_version": 1,
+  "title": "FOF管理系统架构与运行流程",
+  "updated_at": "2026-09-24",
+  "overview": "系统采用本地数据落盘、Python权威计算、受Basic Auth保护的固定API和原生JavaScript展示四层分离架构。浏览器不直接连接邮箱、Wind、RQData或本机文件系统。",
+  "layers": [
+    {
+      "id": "sources",
+      "title": "01 数据源与原始文件",
+      "tone": "source",
+      "nodes": [
+        {
+          "title": "邮件与估值表",
+          "description": "下载配置产品的估值附件，以SHA-256去重并保存原始文件；原始估值表只读。",
+          "files": ["app.py", "valuation_app/mail.py", "valuation_app/organize.py", "valuation_app/valuation_archive.py"]
+        },
+        {
+          "title": "台账、标签与底层资产",
+          "description": "资金台账、产品标签JSON、顶层及底层估值表构成收益和穿透分析的本地业务输入。",
+          "files": ["valuation_app/config.py", "valuation_app/ledger.py", "valuation_app/labels.py", "valuation_app/underlying_assets.py"]
+        },
+        {
+          "title": "受限行情与研究缓存",
+          "description": "Wind和RQData只按项目白名单更新本地缓存；网页请求不开放任意证券代码查询。",
+          "files": ["valuation_app/benchmark.py", "valuation_app/market_research.py", "valuation_app/risk.py", "valuation_app/factors.py"]
+        },
+        {
+          "title": "知识库与场外衍生品资料",
+          "description": "知识库普通inbox与固定微信只读来源均按SHA-256入库；页级文本先做敏感隔离，再生成公司、职业人员、产品、条款、策略、材料披露业绩和风控事实候选。候选、冲突组、审核审计及FOF确定性关系保存在本地SQLite，未经人工确认不成为正式事实。版本化Obsidian Vault以管理人尽调档案为中心导出。OTC资料保存在独立运行目录，所有外部源均只读。",
+          "files": ["valuation_app/knowledge.py", "valuation_app/knowledge_sources.py", "valuation_app/knowledge_diligence.py", "valuation_app/otc_store.py", "valuation_app/otc_ledger.py"]
+        }
+      ]
+    },
+    {
+      "id": "ingestion",
+      "title": "02 解析、标准化与身份映射",
+      "tone": "ingest",
+      "nodes": [
+        {
+          "title": "估值表解析",
+          "description": "识别产品级资产、净值、份额和底层持仓，保留解析来源与错误提示。",
+          "files": ["valuation_app/parser.py", "valuation_app/underlying_archive.py", "valuation_app/bottom_returns.py"]
+        },
+        {
+          "title": "产品身份与标签匹配",
+          "description": "先按标准产品名称和别名匹配，再转换为稳定内部ID；标签按标准化名称除重。",
+          "files": ["valuation_app/config.py", "valuation_app/labels.py", "valuation_app/organize.py"]
+        },
+        {
+          "title": "一致性存储与备份",
+          "description": "分析缓存和运行数据库采用SQLite；业务快照按内容寻址增量备份并支持只恢复到空目录。",
+          "files": ["valuation_app/analysis_cache.py", "valuation_app/backup.py"]
+        }
+      ]
+    },
+    {
+      "id": "calculation",
+      "title": "03 Python权威计算与任务",
+      "tone": "compute",
+      "nodes": [
+        {
+          "title": "收益、基准与归因",
+          "description": "计算现金流加权收益、XIRR、波动率、夏普、最大回撤、Alpha/Beta及持仓变动估算。",
+          "files": ["valuation_app/calculations.py", "valuation_app/analytics.py", "valuation_app/benchmark.py", "valuation_app/attribution_export.py"]
+        },
+        {
+          "title": "穿透、策略与风险",
+          "description": "生成底层收益、组合多空、策略筛选、多因子暴露及固定口径风险结果。",
+          "files": ["valuation_app/bottom_returns.py", "valuation_app/underlying_assets.py", "valuation_app/factors.py", "valuation_app/portfolio_var.py"]
+        },
+        {
+          "title": "场外衍生品",
+          "description": "固定四类结构使用自然月观察日和ACT/365回测，并由同一次结果生成结构专属完整PDF、Excel和JSON；报告不展示内部哈希。经典雪球参数化定价研究按用户输入的常数波动率、贴水率和贴现率运行8个独立扰动Sobol批次，全部本金和收益现金流参与贴现；任务在受限子进程中持久化，网页结果明确不是市场报价或结算价。期权链与局部波动率校准仍属于后续独立研究。",
+          "files": ["valuation_app/otc_backtest.py", "valuation_app/otc_worker.py", "valuation_app/otc_ledger.py", "valuation_app/otc_report.py", "valuation_app/otc_pricing.py", "valuation_app/otc_pricing_worker.py", "web_assets/otc_derivatives.js"]
+        },
+        {
+          "title": "策略实验与受控LLM任务",
+          "description": "策略实验室只消费固定缓存；LLM网关限定任务类型、输入结构和审计边界，不执行模型生成代码。",
+          "files": ["strategy_lab/pipeline.py", "strategy_lab/portfolio.py", "strategy_lab/backtest.py", "valuation_app/llm_gateway.py"]
+        }
+      ]
+    },
+    {
+      "id": "service",
+      "title": "04 构建、服务与固定API",
+      "tone": "service",
+      "nodes": [
+        {
+          "title": "原子网页构建",
+          "description": "构建数据摘要、延迟模块和版本化静态资源，校验完成后原子切换入口，避免资源版本混用。",
+          "files": ["valuation_app/static.py", "web_assets/shell.html", "web_assets/help.json", "web_assets/architecture.json"]
+        },
+        {
+          "title": "本地Web服务",
+          "description": "仅监听本机回环地址，统一执行Basic Auth、参数白名单、gzip、ETag和私有缓存。",
+          "files": ["valuation_app/web.py", "valuation_app/api_v2.py"]
+        },
+        {
+          "title": "刷新、分享与恢复",
+          "description": "计划任务串联刷新、日志轮转、备份和构建；Tailscale Funnel只转发经认证的当前代码版本。",
+          "files": ["scripts/refresh.ps1", "scripts/rotate_refresh_log.ps1", "scripts/start_tailscale_share.ps1", "valuation_app/backup.py"]
+        }
+      ]
+    },
+    {
+      "id": "browser",
+      "title": "05 浏览器交互与页面",
+      "tone": "browser",
+      "nodes": [
+        {
+          "title": "首页与驾驶舱",
+          "description": "空Hash进入欢迎首页；导航、日期、范围和固定深链接由驾驶舱管理。",
+          "files": ["web_assets/bootstrap.js", "web_assets/dashboard.js", "web_assets/styles.css"]
+        },
+        {
+          "title": "业务页面与延迟模块",
+          "description": "首屏只读取摘要，进入页面后按固定模块ID或登记产品ID加载明细和分页数据。",
+          "files": ["web_assets/core.js", "web_assets/dashboard.js", "web_assets/otc_derivatives.js"]
+        },
+        {
+          "title": "安全边界",
+          "description": "浏览器只提交ISO日期、稳定ID、固定范围和白名单参数；不接收本机路径、SQL或任意代码。",
+          "files": ["valuation_app/web.py", "valuation_app/api_v2.py"]
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "step": "01",
+      "title": "触发更新",
+      "description": "人工运行或18:30计划任务调用refresh；计划任务优先使用项目.venv解释器，记录实际解释器、分阶段耗时并检查日志轮转。",
+      "command": "python app.py refresh",
+      "files": ["app.py", "scripts/refresh.ps1"]
+    },
+    {
+      "step": "02",
+      "title": "数据落盘",
+      "description": "邮件附件、白名单行情、业务JSON/Excel和固定目录文档先保存到服务器本地；浏览器不参与下载。",
+      "files": ["valuation_app/mail.py", "valuation_app/benchmark.py", "valuation_app/market_research.py"]
+    },
+    {
+      "step": "03",
+      "title": "解析与标准化",
+      "description": "估值表解析为产品、估值点、现金流及持仓，随后完成稳定ID、标签和来源哈希映射。",
+      "files": ["valuation_app/parser.py", "valuation_app/ledger.py", "valuation_app/labels.py"]
+    },
+    {
+      "step": "04",
+      "title": "计算与缓存",
+      "description": "Python生成收益、基准、穿透、策略、风险及模块状态；SQLite保存可复用的结构化结果。",
+      "files": ["valuation_app/calculations.py", "valuation_app/analysis_cache.py", "valuation_app/bottom_returns.py"]
+    },
+    {
+      "step": "05",
+      "title": "构建版本资源",
+      "description": "build写入轻量入口、首屏摘要、延迟模块和版本化前端资源，全部成功后原子切换。",
+      "command": "python app.py build",
+      "files": ["valuation_app/static.py", "web_assets/shell.html"]
+    },
+    {
+      "step": "06",
+      "title": "认证服务",
+      "description": "web.py在本机提供固定API和静态资源，响应启用Basic Auth、gzip、ETag与private cache。",
+      "command": "python app.py run",
+      "files": ["valuation_app/web.py", "valuation_app/api_v2.py"]
+    },
+    {
+      "step": "07",
+      "title": "浏览器查询与展示",
+      "description": "用户操作由JavaScript转换为受限查询参数；服务端返回JSON，页面再渲染指标、图表和表格。",
+      "files": ["web_assets/bootstrap.js", "web_assets/core.js", "web_assets/dashboard.js"]
+    }
+  ],
+  "interfaces": [
+    {
+      "title": "首屏与核心分析",
+      "routes": ["/api/v2/bootstrap", "/api/v2/overview", "/api/v2/top-returns/<product_id>", "/api/v2/strategy", "/api/v2/factors"]
+    },
+    {
+      "title": "延迟业务模块",
+      "routes": ["/api/modules/<固定模块ID>", "/api/bottom-returns/<product_id>", "/api/otc/backtests/<run_id>", "/api/otc/products"]
+    },
+    {
+      "title": "受控写入与下载",
+      "routes": ["/api/labels", "/api/knowledge/*", "/api/otc/products/<product_id>/attachments", "/api/llm/tasks", "/api/download/*"]
+    }
+  ],
+  "operations": [
+    {"command": "python app.py analyze", "purpose": "扫描和计算数据，输出业务JSON与解析提示。"},
+    {"command": "python app.py build", "purpose": "重建网页数据、延迟模块和版本化静态资源。"},
+    {"command": "python app.py run", "purpose": "在本机启动受Basic Auth保护的网页服务。"},
+    {"command": "python app.py refresh", "purpose": "串联邮件、行情、计算、构建和配置后的增量备份。"},
+    {"command": "python app.py backup", "purpose": "创建内容寻址的业务数据快照。"},
+    {"command": "python -m unittest discover -s tests -v", "purpose": "运行完整自动化测试。"}
+  ],
+  "file_index": [
+    {"area": "命令入口", "file": "app.py", "responsibility": "注册公开CLI命令、计时及执行编排。"},
+    {"area": "产品配置", "file": "valuation_app/config.py", "responsibility": "维护17只顶层产品、稳定ID、名称和别名。"},
+    {"area": "估值解析", "file": "valuation_app/parser.py", "responsibility": "解析产品资产、净值、份额和持仓。"},
+    {"area": "收益计算", "file": "valuation_app/calculations.py", "responsibility": "处理现金流、收益、XIRR及日期边界。"},
+    {"area": "分析指标", "file": "valuation_app/analytics.py", "responsibility": "计算风险收益指标与组合统计。"},
+    {"area": "分析缓存", "file": "valuation_app/analysis_cache.py", "responsibility": "构建只读分析SQLite并记录来源哈希。"},
+    {"area": "底层收益", "file": "valuation_app/bottom_returns.py", "responsibility": "登记再穿透产品并缓存净值与叶子持仓。"},
+    {"area": "标签", "file": "valuation_app/labels.py", "responsibility": "提供标签权威源、匹配、修订和审计。"},
+    {"area": "场外衍生品", "file": "valuation_app/otc_backtest.py", "responsibility": "执行固定结构历史样本回测并固化完整报告分项数据。"},
+    {"area": "场外衍生品", "file": "valuation_app/otc_report.py", "responsibility": "从同一次结果生成结构专属A4横版完整PDF。"},
+    {"area": "场外衍生品研究", "file": "valuation_app/otc_pricing.py", "responsibility": "经典雪球参数化GBM定价、独立扰动批次误差、公平票息与历史参考；高级期权链校准函数继续隔离保留。"},
+    {"area": "场外衍生品任务", "file": "valuation_app/otc_pricing_worker.py", "responsibility": "在受限子进程运行定价任务并将固定JSON结果原子写入运行目录。"},
+    {"area": "场外簿记", "file": "valuation_app/otc_ledger.py", "responsibility": "管理发行产品、事件、收益和附件元数据。"},
+    {"area": "网页构建", "file": "valuation_app/static.py", "responsibility": "生成页面数据、延迟模块及版本资源清单。"},
+    {"area": "Web服务", "file": "valuation_app/web.py", "responsibility": "提供认证、固定API、静态资源和下载。"},
+    {"area": "v2接口", "file": "valuation_app/api_v2.py", "responsibility": "校验固定参数并返回分页分析结果。"},
+    {"area": "前端引导", "file": "web_assets/bootstrap.js", "responsibility": "加载首屏摘要并恢复Hash深链接。"},
+    {"area": "核心交互", "file": "web_assets/core.js", "responsibility": "渲染计算、资料窗口及通用交互。"},
+    {"area": "驾驶舱", "file": "web_assets/dashboard.js", "responsibility": "管理导航、页面挂载、总览和数据说明。"},
+    {"area": "页面样式", "file": "web_assets/styles.css", "responsibility": "维护全站响应式布局和视觉样式。"}
+  ]
+}

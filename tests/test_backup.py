@@ -53,11 +53,16 @@ class BackupTest(unittest.TestCase):
         connection.execute("create table products(name text)")
         connection.execute("insert into products values ('发行产品')")
         connection.commit(); connection.close()
+        attachment_dir = os.path.join(otc, "attachments", "files")
+        os.makedirs(attachment_dir)
+        with open(os.path.join(attachment_dir, "content.md"), "w", encoding="utf-8") as output:
+            output.write("合同内容")
         snapshot = create_backup(self.project, self.backup)
         with open(os.path.join(self.backup, "snapshots", snapshot["snapshot_id"] + ".json"),
                   encoding="utf-8") as handle:
             paths = [item["path"] for item in json.load(handle)["files"]]
         self.assertIn("otc_derivatives_data/otc.sqlite3", paths)
+        self.assertIn("otc_derivatives_data/attachments/files/content.md", paths)
 
     def test_tamper_is_detected_and_nonempty_restore_is_rejected(self):
         result = create_backup(self.project, self.backup)

@@ -21,6 +21,9 @@ from .mail import load_env
 from .labels import LabelConflictError, build_label_payload, mutate_catalog
 from .bottom_returns import analyze_bottom_return
 from .otc_store import OtcStore, RevisionConflictError, TaskConflictError
+from .llm_gateway import LLMDisabledError, LLMGateway
+from .knowledge_sources import KnowledgeSourceStore
+from .knowledge_diligence import KnowledgeDiligenceStore
 from . import api_v2
 
 
@@ -74,59 +77,6 @@ def _system_docs_credentials(env_path):
     if not user or not password:
         raise RuntimeError("未配置 SYSTEM_QA_USER 和 SYSTEM_QA_PASSWORD")
     return user, password
-
-
-class LLMTaskManager:
-    """策略实验室 LLM 生成任务：内存存储 + 单工作线程。
-
-    任务只保留最近 20 条，提交即后台执行，前端轮询状态。
-    """
-
-    def __init__(self, max_tasks=20):
-        self.max_tasks = max_tasks
-        self.tasks = {}
-        self.order = []
-        self.lock = threading.Lock()
-
-    def submit(self, methodology, objective):
-        task_id = "%d-%04d" % (int(time.time() * 1000), len(self.order) % 10000)
-        task = {"id": task_id, "status": "running", "methodology": methodology,
-                "objective": objective, "created_at": time.time(),
-                "result": None, "error": None}
-        with self.lock:
-            self.tasks[task_id] = task
-            self.order.append(task_id)
-            while len(self.order) > self.max_tasks:
-                self.tasks.pop(self.order.pop(0), None)
-        thread = threading.Thread(target=self._run, args=(task_id, methodology, objective))
-        thread.daemon = True
-        thread.start()
-        return task_id
-
-    def _run(self, task_id, methodology, objective):
-        try:
-            from strategy_lab.pipeline import run_llm
-            from strategy_lab.llm.provider import load_providers
-            root = os.path.dirname(os.path.abspath(_llm_root()))
-            providers, _note = load_providers()
-            result = run_llm(methodology, objective, project_root=root, providers=providers)
-            with self.lock:
-                if task_id in self.tasks:
-                    self.tasks[task_id]["result"] = {
-                        "status": result.get("status"), "provider": result.get("provider"),
-                        "spec": result.get("spec"), "errors": result.get("errors"),
-                        "generated_at": result.get("generated_at")}
-                    self.tasks[task_id]["status"] = result.get("status", "failed")
-        except Exception as exc:
-            with self.lock:
-                if task_id in self.tasks:
-                    self.tasks[task_id]["status"] = "failed"
-                    self.tasks[task_id]["error"] = "%s: %s" % (type(exc).__name__, exc)
-
-    def get(self, task_id):
-        with self.lock:
-            task = self.tasks.get(task_id)
-            return dict(task) if task else None
 
 
 class StrategyTaskManager:
@@ -195,11 +145,6 @@ class StrategyTaskManager:
             return dict(task) if task else None
 
 
-def _llm_root():
-    """strategy_lab 所在的项目根（web.py 位于 valuation_app/ 下）。"""
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
 _LLM_METHODOLOGIES = ("risk_parity_score", "momentum_tilt", "value_tilt", "defensive")
 
 
@@ -212,9 +157,15 @@ def make_handler(index_path, user, password, limiter=None,
     asset_lock = threading.Lock()
     label_lock = threading.Lock()
     knowledge_lock = threading.Lock()
-    llm_tasks = LLMTaskManager()
     strategy_tasks = StrategyTaskManager(os.path.dirname(index_path))
     otc_store = OtcStore(os.path.dirname(index_path))
+    llm_env = load_env(os.path.join(os.path.dirname(index_path), ".env"))
+    llm_env.update({key: value for key, value in os.environ.items()
+                    if key.startswith("LLM_") or key.startswith("OLLAMA_")})
+    llm_tasks = LLMGateway(os.path.dirname(index_path), otc_store, llm_env)
+    knowledge_sources = KnowledgeSourceStore(
+        os.path.dirname(index_path), llm_env.get("KNOWLEDGE_WECHAT_ROOT") or None)
+    knowledge_diligence = KnowledgeDiligenceStore(os.path.dirname(index_path))
     asset_cache = {}
     module_files = {
         "factors": "factors.json",
@@ -499,7 +450,9 @@ def make_handler(index_path, user, password, limiter=None,
 
         def _otc_product_query(self):
             query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
-            allowed = {"page", "page_size", "q", "structure", "index_code", "status", "start_from", "start_to"}
+            allowed = {"page", "page_size", "q", "structure", "index_code", "status", "lifecycle",
+                       "strategy_name", "start_from", "start_to", "end_from", "end_to",
+                       "return_from", "return_to", "return_state", "sort_by", "sort_dir"}
             if set(query) - allowed or any(len(values) != 1 for values in query.values()):
                 raise ValueError("仅接受固定产品筛选参数")
             page = int(query.pop("page", ["1"])[0]); page_size = int(query.pop("page_size", ["50"])[0])
@@ -517,15 +470,66 @@ def make_handler(index_path, user, password, limiter=None,
                     page, page_size = self._otc_query()
                     self._send_cached_json(otc_store.list_runs(page, page_size), include_body)
                     return
+                if route == "/api/otc/pricing":
+                    self._send_cached_json(otc_store.pricing_payload(), include_body)
+                    return
+                if route == "/api/otc/pricing/runs":
+                    page, page_size = self._otc_query()
+                    self._send_cached_json(otc_store.list_pricing_runs(page, page_size), include_body)
+                    return
+                pricing_match = re.match(
+                    r"^/api/otc/pricing/runs/([0-9a-f-]{36})(?:/(download\.json))?$", route)
+                if pricing_match:
+                    run_id, action = pricing_match.groups()
+                    if not otc_store.valid_run_id(run_id):
+                        self.send_error(404); return
+                    if action == "download.json":
+                        path = otc_store.pricing_download_path(run_id)
+                        run = otc_store.get_pricing_run(run_id)
+                        name = str((run.get("request") or {}).get("product_name") or "经典雪球理论定价")
+                        safe_name = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "_", name).strip("._-")[:80]
+                        self._serve_download(path, "%s_%s.json" % (safe_name or "经典雪球理论定价", run_id[:8]),
+                                             "application/json; charset=utf-8", include_body)
+                    else:
+                        self._send_cached_json(otc_store.pricing_result(run_id), include_body)
+                    return
                 if route == "/api/otc/products":
                     page, page_size, filters = self._otc_product_query()
                     self._send_cached_json(otc_store.list_products(page, page_size, filters), include_body)
+                    return
+                if route == "/api/otc/backtest-templates":
+                    self._send_cached_json(otc_store.list_templates(), include_body)
+                    return
+                attachment_list_match = re.match(
+                    r"^/api/otc/products/([0-9a-f-]{36})/attachments$", route)
+                if attachment_list_match:
+                    product_id = attachment_list_match.group(1)
+                    self._send_cached_json(
+                        {"attachments": otc_store.list_attachments(product_id)}, include_body)
+                    return
+                attachment_match = re.match(
+                    r"^/api/otc/products/([0-9a-f-]{36})/attachments/([0-9a-f-]{36})(?:/(download))?$",
+                    route)
+                if attachment_match:
+                    product_id, attachment_id, action = attachment_match.groups()
+                    if action == "download":
+                        path, item = otc_store.attachment_file_path(product_id, attachment_id)
+                        self._serve_download(path, item["original_name"],
+                                             "application/octet-stream", include_body)
+                    else:
+                        item = otc_store.get_attachment(product_id, attachment_id, True)
+                        item["text_content"] = str(item.get("text_content") or "")[:200000]
+                        self._send_cached_json({"attachment": item}, include_body)
+                    return
+                template_match = re.match(r"^/api/otc/backtest-templates/([0-9a-f-]{36})$", route)
+                if template_match:
+                    self._send_cached_json({"template": otc_store.get_template(template_match.group(1))}, include_body)
                     return
                 product_match = re.match(r"^/api/otc/products/([0-9a-f-]{36})$", route)
                 if product_match:
                     self._send_cached_json({"product": otc_store.get_product(product_match.group(1))}, include_body)
                     return
-                match = re.match(r"^/api/otc/backtests/([0-9a-f-]{36})(?:/(samples|download\.xlsx|download\.json))?$", route)
+                match = re.match(r"^/api/otc/backtests/([0-9a-f-]{36})(?:/(samples|download\.xlsx|download\.json|download\.pdf))?$", route)
                 if not match or not otc_store.valid_run_id(match.group(1)):
                     self.send_error(404)
                     return
@@ -533,12 +537,15 @@ def make_handler(index_path, user, password, limiter=None,
                 if action == "samples":
                     page, page_size = self._otc_query()
                     self._send_cached_json(otc_store.samples(run_id, page, page_size), include_body)
-                elif action in ("download.xlsx", "download.json"):
-                    kind = "xlsx" if action.endswith("xlsx") else "json"
+                elif action in ("download.xlsx", "download.json", "download.pdf"):
+                    kind = "xlsx" if action.endswith("xlsx") else "pdf" if action.endswith("pdf") else "json"
                     path = otc_store.download_path(run_id, kind)
+                    run = otc_store.get_run(run_id)
+                    product_name = str((run.get("request") or {}).get("product_name") or "期权回测")
+                    safe_name = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "_", product_name).strip("._-")[:80]
                     content_type = ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                    if kind == "xlsx" else "application/json; charset=utf-8")
-                    self._serve_download(path, "期权回测_%s.%s" % (run_id, kind), content_type, include_body)
+                                    if kind == "xlsx" else "application/pdf" if kind == "pdf" else "application/json; charset=utf-8")
+                    self._serve_download(path, "%s_回测报告_%s.%s" % (safe_name or "期权回测", run_id[:8], kind), content_type, include_body)
                 elif action is None:
                     self._send_cached_json(otc_store.result(run_id), include_body)
                 else:
@@ -569,6 +576,21 @@ def make_handler(index_path, user, password, limiter=None,
             except (ValueError, TypeError) as exc:
                 self._send_json(400, {"error": str(exc)})
 
+        def _submit_otc_pricing(self):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json(64 * 1024)
+                run = otc_store.submit_pricing(request, user)
+                self._send_json(202, {"run": run,
+                                      "poll": "/api/otc/pricing/runs/%s" % run["id"]})
+            except TaskConflictError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except RevisionConflictError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
         def _mutate_otc_product(self, action, product_id=None):
             if not self._authenticate():
                 return
@@ -587,6 +609,90 @@ def make_handler(index_path, user, password, limiter=None,
                     product = otc_store.void_product(product_id, request.get("expected_revision"), user)
                     status = 200
                 self._send_json(status, {"product": product})
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except RevisionConflictError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except (ValueError, TypeError, sqlite3.Error) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _upload_otc_attachment(self, product_id):
+            if not self._authenticate():
+                return
+            temporary = None
+            try:
+                request = self._read_json(70 * 1024 * 1024)
+                if not isinstance(request, dict) or set(request) != {
+                        "filename", "content_base64", "category"}:
+                    raise ValueError("附件上传只接受文件名、内容和固定分类")
+                filename = str(request.get("filename") or "")
+                content = base64.b64decode(request.get("content_base64") or "", validate=True)
+                if not content:
+                    raise ValueError("上传文件为空")
+                from .knowledge import MAX_FILE_SIZE
+                if len(content) > MAX_FILE_SIZE:
+                    raise ValueError("文件超过50MB限制")
+                with tempfile.NamedTemporaryFile(
+                        dir=otc_store.root, delete=False,
+                        suffix=os.path.splitext(filename)[1]) as handle:
+                    temporary = handle.name
+                    handle.write(content)
+                item, duplicate = otc_store.add_attachment(
+                    product_id, temporary, filename, request.get("category"), user)
+                self._send_json(200 if duplicate else 201,
+                                {"attachment": item, "duplicate": duplicate})
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except (ValueError, TypeError, OSError, sqlite3.Error) as exc:
+                self._send_json(400, {"error": str(exc)})
+            finally:
+                if temporary and os.path.exists(temporary):
+                    os.remove(temporary)
+
+        def _delete_otc_attachment(self, product_id, attachment_id):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json(4096)
+                if not isinstance(request, dict) or set(request) != {"expected_revision"}:
+                    raise ValueError("附件停用只接受修订号")
+                item = otc_store.deactivate_attachment(
+                    product_id, attachment_id, request.get("expected_revision"), user)
+                self._send_json(200, {"attachment": item})
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except RevisionConflictError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except (ValueError, TypeError, OSError, sqlite3.Error) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _aggregate_otc_products(self):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json(128 * 1024)
+                if not isinstance(request, dict) or set(request) != {"product_ids"}:
+                    raise ValueError("勾选合计只接受产品ID数组")
+                self._send_json(200, {"aggregates": otc_store.aggregate_products(
+                    request.get("product_ids"))})
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except (ValueError, TypeError, sqlite3.Error) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _mutate_otc_template(self, action, template_id=None):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json(64 * 1024)
+                if action == "create":
+                    template = otc_store.create_template(request.get("name"), request.get("request") or {}, user); status = 201
+                elif action == "update":
+                    template = otc_store.update_template(template_id, request.get("name"), request.get("request") or {},
+                                                         request.get("expected_revision"), user); status = 200
+                else:
+                    template = otc_store.void_template(template_id, request.get("expected_revision"), user); status = 200
+                self._send_json(status, {"template": template})
             except KeyError as exc:
                 self._send_json(404, {"error": str(exc)})
             except RevisionConflictError as exc:
@@ -760,17 +866,56 @@ def make_handler(index_path, user, password, limiter=None,
                 return
             try:
                 request = self._read_json()
-            except ValueError as exc:
+                if not isinstance(request, dict) or set(request) - {"methodology", "objective"}:
+                    raise ValueError("策略生成只接受固定方法论和目标")
+                methodology = str(request.get("methodology") or "")
+                objective = str(request.get("objective") or "")[:500]
+                if methodology not in _LLM_METHODOLOGIES:
+                    raise ValueError("方法论不在白名单")
+                task_id = llm_tasks.submit_strategy(methodology, objective, user)
+                self._send_json(202, {"task_id": task_id, "status": "running",
+                                      "poll": "/api/strategy-lab/task/%s" % task_id})
+            except LLMDisabledError as exc:
+                self._send_json(503, {"error": str(exc), "enabled": False})
+            except (ValueError, TypeError) as exc:
                 self._send_json(400, {"error": str(exc)})
+
+        def _submit_unified_llm_task(self):
+            if not self._authenticate():
                 return
-            methodology = str(request.get("methodology") or "")
-            objective = str(request.get("objective") or "")[:500]
-            if methodology not in _LLM_METHODOLOGIES:
-                self._send_json(400, {"error": "方法论不在白名单"})
-                return
-            task_id = llm_tasks.submit(methodology, objective)
-            self._send_json(202, {"task_id": task_id, "status": "running",
-                                  "poll": "/api/strategy-lab/task/%s" % task_id})
+            try:
+                request = self._read_json(64 * 1024)
+                if not isinstance(request, dict):
+                    raise ValueError("大模型任务请求无效")
+                task_type = request.get("task_type")
+                if task_type == "strategy_spec":
+                    if set(request) != {"task_type", "methodology", "objective"}:
+                        raise ValueError("策略生成参数不在固定清单")
+                    methodology = str(request.get("methodology") or "")
+                    if methodology not in _LLM_METHODOLOGIES:
+                        raise ValueError("方法论不在白名单")
+                    task_id = llm_tasks.submit_strategy(
+                        methodology, str(request.get("objective") or "")[:500], user)
+                elif task_type == "otc_field_audit":
+                    if set(request) != {"task_type", "product_id", "expected_revision"}:
+                        raise ValueError("字段排查参数不在固定清单")
+                    product_id = str(request.get("product_id") or "")
+                    if not otc_store.valid_run_id(product_id):
+                        raise ValueError("产品ID无效")
+                    task_id = llm_tasks.submit_field_audit(
+                        product_id, request.get("expected_revision"), user)
+                else:
+                    raise ValueError("大模型任务类型不在白名单")
+                self._send_json(202, {"task_id": task_id, "status": "running",
+                                      "poll": "/api/llm/tasks/%s" % task_id})
+            except LLMDisabledError as exc:
+                self._send_json(503, {"error": str(exc), "enabled": False})
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except RevisionConflictError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except (ValueError, TypeError, sqlite3.Error) as exc:
+                self._send_json(400, {"error": str(exc)})
 
         def _serve_llm_task(self, task_id):
             if not self._authenticate():
@@ -784,6 +929,11 @@ def make_handler(index_path, user, password, limiter=None,
                 self._send_json(404, {"error": "任务不存在或已过期"})
                 return
             self._send_json(200, task)
+
+        def _serve_llm_status(self, include_body=True):
+            if not self._authenticate():
+                return
+            self._send_cached_json(llm_tasks.status(), include_body)
 
         def _serve_labels(self):
             if not self._authenticate():
@@ -874,15 +1024,198 @@ def make_handler(index_path, user, password, limiter=None,
             from .knowledge import KnowledgeStore
             return KnowledgeStore(os.path.join(os.path.dirname(index_path), "knowledge_base"))
 
+        def _serve_knowledge_sources(self):
+            if self._authenticate():
+                self._send_json(200, knowledge_sources.sources())
+
+        def _submit_knowledge_scan(self):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json()
+                if request and request.get("source_id") not in (None, "wechat"):
+                    raise ValueError("来源ID无效")
+                task_id = knowledge_sources.create_scan()
+                worker = threading.Thread(target=knowledge_sources.scan, args=(task_id,))
+                worker.daemon = True
+                worker.start()
+                self._send_json(202, {"task_id": task_id, "status": "运行中"})
+            except RuntimeError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except (ValueError, OSError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _serve_knowledge_scan_task(self, task_id):
+            if not self._authenticate():
+                return
+            try:
+                self._send_json(200, knowledge_sources.scan_task(task_id))
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _serve_knowledge_candidates(self):
+            if not self._authenticate():
+                return
+            query = parse_qs(urlsplit(self.path).query)
+            try:
+                value = knowledge_sources.candidates(
+                    query.get("status", [""])[0], query.get("page", [1])[0],
+                    query.get("page_size", [50])[0], query.get("product_id", [""])[0])
+                self._send_json(200, value)
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _mutate_knowledge_candidate(self, candidate_id):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json()
+                item = knowledge_sources.update_candidate(candidate_id, request.get("expected_revision"),
+                                                          request.get("action"), request.get("product_id", ""))
+                self._send_json(200, {"candidate": item})
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except RuntimeError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _import_knowledge_candidates(self):
+            if not self._authenticate():
+                return
+            try:
+                self._send_json(200, knowledge_sources.import_candidates(
+                    self._read_json().get("candidate_ids") or []))
+            except (ValueError, RuntimeError, OSError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _serve_knowledge_graph(self):
+            # The graph response includes evidence-rich entity types and a suggested
+            # manager/product center; keep this endpoint versioned with web.py health.
+            if not self._authenticate():
+                return
+            query = parse_qs(urlsplit(self.path).query)
+            try:
+                self._send_json(200, knowledge_sources.graph(
+                    query.get("type", [""])[0], query.get("q", [""])[0], query.get("limit", [500])[0],
+                    query.get("center_id", [""])[0]))
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _serve_knowledge_facts(self):
+            if not self._authenticate():
+                return
+            query = parse_qs(urlsplit(self.path).query)
+            try:
+                self._send_json(200, knowledge_diligence.facts(
+                    query.get("status", [""])[0], query.get("type", [""])[0],
+                    query.get("document_id", [""])[0], query.get("q", [""])[0],
+                    query.get("conflict", [""])[0], query.get("page", [1])[0],
+                    query.get("page_size", [50])[0]))
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _mutate_knowledge_fact(self, fact_id):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json()
+                value = knowledge_diligence.update_fact(
+                    fact_id, request.get("expected_revision"), request.get("action"),
+                    request.get("values") or {}, user)
+                self._send_json(200, {"fact": value})
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except RuntimeError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _batch_knowledge_facts(self):
+            if not self._authenticate():
+                return
+            try:
+                request = self._read_json()
+                self._send_json(200, knowledge_diligence.batch_update(
+                    request.get("items") or [], request.get("action"), user))
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except RuntimeError as exc:
+                self._send_json(409, {"error": str(exc)})
+            except (ValueError, TypeError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _serve_knowledge_dossier(self, entity_id):
+            if not self._authenticate():
+                return
+            try:
+                self._send_json(200, knowledge_diligence.dossier(entity_id))
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _create_knowledge_obsidian_export(self):
+            if not self._authenticate():
+                return
+            try:
+                self._send_json(201, knowledge_sources.export_obsidian())
+            except (ValueError, OSError) as exc:
+                self._send_json(400, {"error": str(exc)})
+
+        def _download_knowledge_export(self, export_id):
+            if not self._authenticate():
+                return
+            try:
+                path, _item = knowledge_sources.export_path(export_id)
+                with open(path, "rb") as handle:
+                    body = handle.read()
+            except KeyError as exc:
+                self._send_json(404, {"error": str(exc)})
+                return
+            except (ValueError, RuntimeError, OSError) as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", "attachment; filename=knowledge-vault.zip")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
         def _serve_knowledge_list(self):
             if not self._authenticate():
                 return
             parsed = urlsplit(self.path)
-            query = parse_qs(parsed.query).get("q", [""])[0]
-            inactive = parse_qs(parsed.query).get("inactive", ["0"])[0] == "1"
+            params = parse_qs(parsed.query)
+            query = params.get("q", [""])[0]
+            inactive = params.get("inactive", ["0"])[0] == "1"
             try:
-                items = self._knowledge_store().list(query, inactive)
-                self._send_json(200, {"documents": items, "query": query})
+                items = self._knowledge_store().list(query, inactive, 500)
+                contexts = knowledge_sources.document_context([item["id"] for item in items])
+                for item in items:
+                    item["source_context"] = contexts.get(str(item["id"]), {})
+                product = params.get("product", [""])[0][:200]
+                manager = params.get("manager", [""])[0][:200]
+                source = params.get("source", [""])[0][:100]
+                review = params.get("review_status", [""])[0][:30]
+                fof_id = params.get("fof_id", [""])[0][:100]
+                if product:
+                    items = [item for item in items if item.get("product") == product]
+                if manager:
+                    items = [item for item in items if item.get("organization") == manager]
+                if source:
+                    items = [item for item in items if item.get("source") == source]
+                if review:
+                    items = [item for item in items if item["source_context"].get("review_status") == review]
+                if fof_id:
+                    items = [item for item in items if any(fof.get("id") == fof_id for fof in item["source_context"].get("associated_fofs", []))]
+                self._send_json(200, {"documents": items, "query": query,
+                                      "filters": {"product": product, "manager": manager, "source": source,
+                                                  "review_status": review, "fof_id": fof_id}})
             except (ValueError, OSError) as exc:
                 self._send_json(400, {"error": str(exc)})
 
@@ -972,7 +1305,11 @@ def make_handler(index_path, user, password, limiter=None,
             if route == "/api/health":
                 if self._authenticate():
                     self._send_json(200, {"status": "ok", "server_code_sha256": server_code_sha256})
-            elif route == "/api/modules/otc-derivatives" or route in ("/api/otc/backtests", "/api/otc/products") or route.startswith("/api/otc/backtests/") or route.startswith("/api/otc/products/"):
+            elif route == "/api/llm/status":
+                self._serve_llm_status()
+            elif route.startswith("/api/llm/tasks/"):
+                self._serve_llm_task(route[len("/api/llm/tasks/"):])
+            elif route == "/api/modules/otc-derivatives" or route in ("/api/otc/backtests", "/api/otc/products", "/api/otc/backtest-templates", "/api/otc/pricing", "/api/otc/pricing/runs") or route.startswith("/api/otc/backtests/") or route.startswith("/api/otc/products/") or route.startswith("/api/otc/backtest-templates/") or route.startswith("/api/otc/pricing/runs/"):
                 self._serve_otc_get(route)
             elif route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
                 self._serve_v2(route)
@@ -986,6 +1323,20 @@ def make_handler(index_path, user, password, limiter=None,
                 self._serve_labels()
             elif route == "/api/knowledge":
                 self._serve_knowledge_list()
+            elif route == "/api/knowledge/sources":
+                self._serve_knowledge_sources()
+            elif route.startswith("/api/knowledge/scan-tasks/"):
+                self._serve_knowledge_scan_task(route.rsplit("/", 1)[-1])
+            elif route == "/api/knowledge/candidates":
+                self._serve_knowledge_candidates()
+            elif route == "/api/knowledge/facts":
+                self._serve_knowledge_facts()
+            elif route == "/api/knowledge/graph":
+                self._serve_knowledge_graph()
+            elif route.startswith("/api/knowledge/dossiers/"):
+                self._serve_knowledge_dossier(route.rsplit("/", 1)[-1])
+            elif route.startswith("/api/knowledge/exports/") and route.endswith("/download"):
+                self._download_knowledge_export(route.split("/")[-2])
             elif route.startswith("/api/knowledge/"):
                 parts = route.strip("/").split("/")
                 if len(parts) == 3 and parts[2].isdigit():
@@ -1021,12 +1372,24 @@ def make_handler(index_path, user, password, limiter=None,
         def do_POST(self):
             route = urlsplit(self.path).path
             event_match = re.match(r"^/api/otc/products/([0-9a-f-]{36})/events$", route)
+            attachment_match = re.match(
+                r"^/api/otc/products/([0-9a-f-]{36})/attachments$", route)
             if route == "/api/system-docs/access":
                 self._serve_system_docs()
+            elif route == "/api/llm/tasks":
+                self._submit_unified_llm_task()
             elif route == "/api/otc/backtests":
                 self._submit_otc_backtest()
+            elif route == "/api/otc/pricing/runs":
+                self._submit_otc_pricing()
             elif route == "/api/otc/products":
                 self._mutate_otc_product("create")
+            elif route == "/api/otc/products/aggregate":
+                self._aggregate_otc_products()
+            elif route == "/api/otc/backtest-templates":
+                self._mutate_otc_template("create")
+            elif attachment_match:
+                self._upload_otc_attachment(attachment_match.group(1))
             elif event_match:
                 self._mutate_otc_product("event", event_match.group(1))
             elif urlsplit(self.path).path == "/api/labels":
@@ -1043,14 +1406,35 @@ def make_handler(index_path, user, password, limiter=None,
                 self._upload_knowledge()
             elif urlsplit(self.path).path == "/api/knowledge/import-inbox":
                 self._import_knowledge_inbox()
+            elif route == "/api/knowledge/sources/wechat/scan":
+                self._submit_knowledge_scan()
+            elif route == "/api/knowledge/candidates/import":
+                self._import_knowledge_candidates()
+            elif route == "/api/knowledge/facts/batch":
+                self._batch_knowledge_facts()
+            elif route == "/api/knowledge/obsidian-export":
+                # The store emits a complete, collision-safe, status-partitioned Markdown Vault.
+                self._create_knowledge_obsidian_export()
             else:
                 self.send_error(404)
 
         def do_PATCH(self):
             route = urlsplit(self.path).path
             otc_match = re.match(r"^/api/otc/products/([0-9a-f-]{36})$", route)
+            template_match = re.match(r"^/api/otc/backtest-templates/([0-9a-f-]{36})$", route)
             if otc_match:
                 self._mutate_otc_product("update", otc_match.group(1))
+                return
+            elif template_match:
+                self._mutate_otc_template("update", template_match.group(1))
+                return
+            candidate_match = re.match(r"^/api/knowledge/candidates/([0-9a-f-]{36})$", route)
+            if candidate_match:
+                self._mutate_knowledge_candidate(candidate_match.group(1))
+                return
+            fact_match = re.match(r"^/api/knowledge/facts/([0-9a-f-]{36})$", route)
+            if fact_match:
+                self._mutate_knowledge_fact(fact_match.group(1))
                 return
             knowledge_prefix = "/api/knowledge/"
             knowledge_id = route[len(knowledge_prefix):] if route.startswith(knowledge_prefix) else ""
@@ -1067,8 +1451,17 @@ def make_handler(index_path, user, password, limiter=None,
         def do_DELETE(self):
             route = urlsplit(self.path).path
             otc_match = re.match(r"^/api/otc/products/([0-9a-f-]{36})$", route)
-            if otc_match:
+            attachment_match = re.match(
+                r"^/api/otc/products/([0-9a-f-]{36})/attachments/([0-9a-f-]{36})$", route)
+            template_match = re.match(r"^/api/otc/backtest-templates/([0-9a-f-]{36})$", route)
+            if attachment_match:
+                self._delete_otc_attachment(attachment_match.group(1), attachment_match.group(2))
+                return
+            elif otc_match:
                 self._mutate_otc_product("void", otc_match.group(1))
+                return
+            elif template_match:
+                self._mutate_otc_template("void", template_match.group(1))
                 return
             knowledge_prefix = "/api/knowledge/"
             knowledge_id = route[len(knowledge_prefix):] if route.startswith(knowledge_prefix) else ""
@@ -1088,7 +1481,11 @@ def make_handler(index_path, user, password, limiter=None,
             if route == "/api/health":
                 if self._authenticate():
                     self._send_json(200, {"status": "ok", "server_code_sha256": server_code_sha256}, False)
-            elif route == "/api/modules/otc-derivatives" or route in ("/api/otc/backtests", "/api/otc/products") or route.startswith("/api/otc/backtests/") or route.startswith("/api/otc/products/"):
+            elif route == "/api/llm/status":
+                self._serve_llm_status(False)
+            elif route.startswith("/api/llm/tasks/"):
+                self._serve_llm_task(route[len("/api/llm/tasks/"):])
+            elif route == "/api/modules/otc-derivatives" or route in ("/api/otc/backtests", "/api/otc/products", "/api/otc/backtest-templates", "/api/otc/pricing", "/api/otc/pricing/runs") or route.startswith("/api/otc/backtests/") or route.startswith("/api/otc/products/") or route.startswith("/api/otc/backtest-templates/") or route.startswith("/api/otc/pricing/runs/"):
                 self._serve_otc_get(route, False)
             elif route == "/api/v2/bootstrap" or route == "/api/v2/overview" or route == "/api/v2/strategy" or route == "/api/v2/factors" or route.startswith("/api/v2/top-returns/") or route.startswith("/api/v2/factors/") or route.startswith("/api/v2/market/"):
                 self._serve_v2(route, False)

@@ -21,7 +21,8 @@ import pandas as pd
 from openpyxl import Workbook
 
 
-ENGINE_VERSION = "otc-calendar-365-v1"
+ENGINE_VERSION = "otc-calendar-365-v2"
+REPORT_SCHEMA_VERSION = 2
 SOURCE_COMMIT = "1df9e0be3f1da75221172c71f60905ed7c247e3d"
 SOURCE_PATCH_HASH = "59dfa1e66c54607d1d5e6f9228e6de353d8084d0"
 STRUCTURES = {
@@ -35,6 +36,49 @@ INDICES = {
     "000905": "中证500",
     "000300": "沪深300",
 }
+
+PARAMETER_DEFINITIONS = (
+    {"name": "term_months", "label": "期限（月）", "type": "integer", "min": 1, "max": 60, "default": 24, "structures": "all"},
+    {"name": "lock_period_months", "label": "敲出锁定期（月）", "type": "integer", "min": 1, "max": 60, "default": 3, "structures": "all"},
+    {"name": "knock_in_ratio", "label": "敲入比例", "type": "number", "min": .30, "max": .99, "step": .001, "default": .70, "structures": "all"},
+    {"name": "knock_out_initial", "label": "初始敲出比例", "type": "number", "min": .80, "max": 1.20, "step": .001, "default": 1.0, "structures": "all"},
+    {"name": "knock_out_decrease_monthly", "label": "每月降敲", "type": "number", "min": 0, "max": .05, "step": .0001, "default": .005, "structures": "all"},
+    {"name": "first_coupon", "label": "前段年化票息", "type": "number", "min": 0, "max": .50, "step": .001, "default": .12, "structures": ("classic_snowball", "european_snowball", "dcn_snowball_combo")},
+    {"name": "second_coupon", "label": "后段年化票息", "type": "number", "min": 0, "max": .50, "step": .001, "default": .12, "structures": ("classic_snowball", "european_snowball", "dcn_snowball_combo")},
+    {"name": "coupon_switch_months", "label": "票息切换月", "type": "integer", "min": 1, "max": 60, "default": 12, "structures": ("classic_snowball", "european_snowball", "dcn_snowball_combo")},
+    {"name": "max_loss", "label": "最大亏损", "type": "number", "min": .01, "max": 1, "step": .01, "default": None, "optional": True, "structures": ("classic_snowball", "european_snowball", "dcn")},
+    {"name": "dividend_barrier", "label": "派息障碍", "type": "number", "min": .50, "max": .99, "step": .001, "default": .80, "structures": ("dcn", "dcn_snowball_combo")},
+    {"name": "monthly_dividend", "label": "月派息率", "type": "number", "min": 0, "max": .05, "step": .0001, "default": .0088, "structures": ("dcn", "dcn_snowball_combo")},
+    {"name": "dcn_weight", "label": "DCN收益组合系数", "type": "number", "min": .01, "max": 10, "step": .01, "default": 1.0, "structures": ("dcn_snowball_combo",)},
+    {"name": "snowball_weight", "label": "雪球收益组合系数", "type": "number", "min": .01, "max": 10, "step": .01, "default": .2, "structures": ("dcn_snowball_combo",)},
+    {"name": "dcn_max_loss", "label": "DCN最大亏损", "type": "number", "min": .01, "max": 1, "step": .01, "default": None, "optional": True, "structures": ("dcn_snowball_combo",)},
+    {"name": "snowball_max_loss", "label": "雪球最大亏损", "type": "number", "min": .01, "max": 1, "step": .01, "default": None, "optional": True, "structures": ("dcn_snowball_combo",)},
+)
+
+
+def parameter_definitions():
+    return [dict(item) for item in PARAMETER_DEFINITIONS]
+
+
+def validate_partial_terms(raw):
+    """Validate stored product terms without inventing missing contract terms."""
+    if raw in (None, ""):
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("terms必须是对象")
+    definitions = {item["name"]: item for item in PARAMETER_DEFINITIONS}
+    if set(raw) - set(definitions):
+        raise ValueError("包含未登记的回测参数")
+    clean = {}
+    for name, value in raw.items():
+        definition = definitions[name]
+        if value in (None, "") and definition.get("optional"):
+            clean[name] = None
+        elif definition["type"] == "integer":
+            clean[name] = _integer(value, definition["label"], definition["min"], definition["max"])
+        else:
+            clean[name] = _number(value, definition["label"], definition["min"], definition["max"])
+    return clean
 
 
 def _number(value, name, minimum=None, maximum=None, optional=False):
@@ -79,8 +123,9 @@ def validate_request(raw):
         "lock_period_months", "knock_in_ratio", "knock_out_initial",
         "knock_out_decrease_monthly", "first_coupon", "second_coupon",
         "coupon_switch_months", "max_loss", "dividend_barrier",
-        "monthly_dividend", "dcn_weight", "snowball_weight", "product_id",
-        "product_revision",
+        "monthly_dividend", "dcn_weight", "snowball_weight", "dcn_max_loss",
+        "snowball_max_loss", "product_id", "product_revision", "template_id",
+        "template_revision", "product_name",
     }
     extra = set(raw) - allowed
     if extra:
@@ -112,12 +157,22 @@ def validate_request(raw):
         "first_coupon": _number(raw.get("first_coupon", 0.12), "前段年化票息", 0, 0.50),
         "second_coupon": _number(raw.get("second_coupon", 0.12), "后段年化票息", 0, 0.50),
         "coupon_switch_months": switch_months,
-        "max_loss": _number(raw.get("max_loss"), "最大亏损", 0.000001, 1.0, True),
+        "max_loss": _number(raw.get("max_loss"), "最大亏损", 0.01, 1.0, True),
         "dividend_barrier": _number(raw.get("dividend_barrier", 0.80), "派息障碍", 0.50, 0.99),
         "monthly_dividend": _number(raw.get("monthly_dividend", 0.0088), "月派息率", 0, 0.05),
-        "dcn_weight": _number(raw.get("dcn_weight", 1.0), "DCN收益组合系数", 0.000001, 10),
-        "snowball_weight": _number(raw.get("snowball_weight", 0.2), "雪球收益组合系数", 0.000001, 10),
+        "dcn_weight": _number(raw.get("dcn_weight", 1.0), "DCN收益组合系数", 0.01, 10),
+        "snowball_weight": _number(raw.get("snowball_weight", 0.2), "雪球收益组合系数", 0.01, 10),
     }
+    product_name = str(raw.get("product_name") or "").strip()
+    if len(product_name) > 120:
+        raise ValueError("产品名称不能超过120字")
+    if any(ord(char) < 32 for char in product_name) or any(char in product_name for char in '/\\:*?"<>|'):
+        raise ValueError("产品名称不得包含控制字符或路径/文件名特殊字符")
+    result["product_name"] = product_name or "%s－%s－%s" % (
+        STRUCTURES[structure], INDICES[index_code], end_date)
+    if structure == "dcn_snowball_combo":
+        result["dcn_max_loss"] = _number(raw.get("dcn_max_loss"), "DCN最大亏损", .01, 1, True)
+        result["snowball_max_loss"] = _number(raw.get("snowball_max_loss"), "雪球最大亏损", .01, 1, True)
     product_id = raw.get("product_id")
     if product_id is not None:
         text = str(product_id)
@@ -125,6 +180,13 @@ def validate_request(raw):
             raise ValueError("产品ID无效")
         result["product_id"] = text
         result["product_revision"] = _integer(raw.get("product_revision"), "产品修订号", 1, 1000000000)
+    template_id = raw.get("template_id")
+    if template_id is not None:
+        text = str(template_id)
+        if len(text) != 36:
+            raise ValueError("模板ID无效")
+        result["template_id"] = text
+        result["template_revision"] = _integer(raw.get("template_revision"), "模板修订号", 1, 1000000000)
     return result
 
 
@@ -336,6 +398,52 @@ def _charts(samples):
     }
 
 
+def _component_samples(samples, component):
+    """Project combo rows into component rows without recalculating a payoff."""
+    rows = []
+    for source in samples:
+        row = dict(source)
+        if component == "dcn":
+            row["absolute_return"] = source.get("dcn_absolute_return")
+            row["knocked_in"] = bool(source.get("dcn_knocked_in"))
+        else:
+            row["absolute_return"] = source.get("snowball_absolute_return")
+            row["knocked_in"] = bool(source.get("snowball_knocked_in"))
+            row.pop("dividend_count", None)
+        if row.get("absolute_return") is not None and row.get("holding_calendar_days"):
+            row["annualized_return"] = row["absolute_return"] * 365.0 / row["holding_calendar_days"]
+        else:
+            row["annualized_return"] = None
+        rows.append(row)
+    return rows
+
+
+def _report_pages(structure):
+    if structure == "dcn_snowball_combo":
+        return [
+            "组合情景路径", "DCN情景路径", "雪球情景路径",
+            "DCN参数", "DCN汇总", "DCN收益图", "DCN存续期", "DCN派息分布",
+            "雪球参数", "雪球汇总", "雪球收益图", "雪球存续期",
+            "组合参数", "组合汇总", "组合收益图", "组合存续期",
+        ]
+    pages = ["条款情景路径", "参数", "汇总", "指数与样本收益", "存续期分布"]
+    if structure == "dcn":
+        pages.append("派息次数分布")
+    return pages
+
+
+def _report_components(structure, samples):
+    if structure != "dcn_snowball_combo":
+        return {}
+    dcn_rows = _component_samples(samples, "dcn")
+    snow_rows = _component_samples(samples, "snowball")
+    return {
+        "dcn": {"summary": _summary(dcn_rows, "dcn"), "charts": _charts(dcn_rows)},
+        "snowball": {"summary": _summary(snow_rows, "classic_snowball"), "charts": _charts(snow_rows)},
+        "combo": {"summary": _summary(samples, "dcn_snowball_combo"), "charts": _charts(samples)},
+    }
+
+
 def run_backtest(request, cache_path):
     request = validate_request(request)
     frame, source = load_prices(cache_path, request)
@@ -344,8 +452,8 @@ def run_backtest(request, cache_path):
     samples = []
     for position in range(len(frame)):
         if structure == "dcn_snowball_combo":
-            dcn = _single(frame, position, terms, "dcn")
-            snow = _single(frame, position, terms, "classic_snowball")
+            dcn = _single(frame, position, _terms(request, request.get("dcn_max_loss")), "dcn")
+            snow = _single(frame, position, _terms(request, request.get("snowball_max_loss")), "classic_snowball")
             row = dict(dcn)
             row["dcn_absolute_return"] = dcn.get("absolute_return")
             row["snowball_absolute_return"] = snow.get("absolute_return")
@@ -359,7 +467,8 @@ def run_backtest(request, cache_path):
         else:
             samples.append(_single(frame, position, terms, structure))
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "engine_version": ENGINE_VERSION,
         "source_commit": SOURCE_COMMIT,
         "source_patch_hash": SOURCE_PATCH_HASH,
@@ -368,6 +477,8 @@ def run_backtest(request, cache_path):
         "structure_name": STRUCTURES[structure],
         "index_code": request["index_code"],
         "index_name": INDICES[request["index_code"]],
+        "product_name": request["product_name"],
+        "report_name": "%s－回测报告" % request["product_name"],
         "time_convention": "calendar_365",
         "day_count_basis": 365,
         "date_adjustment": "following",
@@ -375,6 +486,8 @@ def run_backtest(request, cache_path):
         "source": source,
         "summary": _summary(samples, structure),
         "charts": _charts(samples),
+        "report_pages": _report_pages(structure),
+        "report_components": _report_components(structure, samples),
         "samples": samples,
     }
 
@@ -384,12 +497,20 @@ def export_excel(result, path):
     summary_sheet = workbook.active
     summary_sheet.title = "汇总统计"
     summary_sheet.append(["项目", "数值"])
+    summary_sheet.append(["产品名称", result.get("product_name")])
+    summary_sheet.append(["报告结构版本", result.get("report_schema_version")])
     for key, value in result.get("summary", {}).items():
         summary_sheet.append([key, value])
     summary_sheet.append(["结构", result.get("structure_name")])
     summary_sheet.append(["指数", result.get("index_name")])
     summary_sheet.append(["实际行情起始日", result.get("source", {}).get("actual_start_date")])
     summary_sheet.append(["实际行情截止日", result.get("source", {}).get("actual_end_date")])
+    parameter_sheet = workbook.create_sheet("参数与报告信息")
+    parameter_sheet.append(["项目", "数值"])
+    for key, value in (result.get("request") or {}).items():
+        parameter_sheet.append([key, value])
+    parameter_sheet.append(["engine_version", result.get("engine_version")])
+    parameter_sheet.append(["report_pages", " / ".join(result.get("report_pages") or [])])
     detail = workbook.create_sheet("逐样本明细")
     fields = []
     for row in result.get("samples", []):

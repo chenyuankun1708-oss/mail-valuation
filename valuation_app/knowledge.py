@@ -132,6 +132,11 @@ def extract_text(path):
         return b" ".join(chunks).decode("utf-8", "ignore")
 
 
+def _clean_unicode(value):
+    """Drop invalid surrogate code points emitted by a few malformed PDF fonts."""
+    return str(value or "").encode("utf-8", "replace").decode("utf-8")
+
+
 def infer_metadata(filename, text):
     sample = (filename + "\n" + (text or "")[:10000]).strip()
     document_type = "其他"
@@ -282,7 +287,7 @@ class KnowledgeStore:
                 if temporary and os.path.exists(temporary):
                     os.remove(temporary)
         try:
-            text = extract_text(destination)
+            text = _clean_unicode(extract_text(destination))
             status = "已提取" if text.strip() else "无文本层，需OCR或人工补录"
         except Exception as exc:
             text = ""

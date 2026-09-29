@@ -1,4 +1,5 @@
 import io
+import os
 import unittest
 from unittest.mock import ANY, patch
 
@@ -7,10 +8,29 @@ from valuation_app.timing import TimingRecorder, format_duration
 
 
 class RefreshCommandTest(unittest.TestCase):
+    def test_refresh_script_is_windows_powershell_safe_and_prefers_venv(self):
+        root = os.path.dirname(os.path.dirname(__file__))
+        path = os.path.join(root, "scripts", "refresh.ps1")
+        with open(path, "r", encoding="utf-8") as handle:
+            script = handle.read()
+        script.encode("ascii")
+        self.assertIn(".venv\\Scripts\\python.exe", script)
+        self.assertIn("& $PythonExe app.py refresh --latest-only", script)
+        self.assertIn("& $PythonExe app.py backup", script)
+        self.assertNotIn("& python app.py", script)
+        self.assertNotIn("Tee-Object -FilePath $LogPath", script)
+        self.assertIn("Out-File -LiteralPath $LogPath -Encoding utf8 -Append", script)
+        self.assertIn("$BackupExitCode = $LASTEXITCODE", script)
+        self.assertIn("if ($BackupExitCode -ne 0) { $ExitCode = $BackupExitCode }", script)
+
     def test_refresh_output_is_safe_for_gbk_logs(self):
-        output = app.refresh_output({"file": "估值报表_\ufffd.xls"})
+        output = app.refresh_output({"download": {"downloaded": ["估值报表_\ufffd.xls"]},
+                                     "factor": {"products": [{"holdings": list(range(10000))}]}})
         output.encode("gbk")
-        self.assertIn("\\ufffd", output)
+        self.assertNotIn("估值报表", output)
+        self.assertIn('"downloaded": 1', output)
+        self.assertIn('"products": 1', output)
+        self.assertLess(len(output), 5000)
 
     @patch("app.update_market_research_cache", return_value={"modules": {}, "errors": []})
     @patch("app.update_factor_cache", return_value={"available": True, "errors": []})

@@ -18,6 +18,8 @@ from valuation_app.factors import update_cache as update_factor_cache
 from valuation_app.mail import download_valuations
 from valuation_app.labels import migrate_catalog
 from valuation_app.knowledge import KnowledgeStore
+from valuation_app.knowledge_sources import KnowledgeSourceStore
+from valuation_app.knowledge_diligence import KnowledgeDiligenceStore
 from valuation_app.otc_ledger import migrate_workbook as migrate_otc_ledger
 from valuation_app.otc_store import OtcStore
 from valuation_app.organize import organize_products
@@ -90,13 +92,65 @@ def refresh_data(products_dir="products", account_users=None, timing=None):
 
 def refresh_output(result):
     """Return a log-safe refresh summary for Windows scheduled tasks."""
-    return json.dumps(result, ensure_ascii=True, indent=2)
+    download = result.get("download") or {}
+    organize = result.get("organize") or {}
+    underlying_mail = result.get("underlying_mail") or {}
+    benchmark = result.get("benchmark") or {}
+    risk = result.get("risk") or {}
+    market = result.get("market_dashboard") or {}
+    factor = result.get("factor") or {}
+    build = result.get("build") or {}
+    build_report = build.get("report") or {}
+    summary = {
+        "download": {
+            "downloaded": len(download.get("downloaded") or []),
+            "duplicates": download.get("duplicates", 0),
+            "failures": download.get("failures") or [],
+            "accounts": len(download.get("accounts") or []),
+        },
+        "organize": {
+            "copied": len(organize.get("copied") or []),
+            "duplicates_skipped": len(organize.get("duplicates_skipped") or []),
+            "errors": organize.get("errors") or [],
+        },
+        "underlying_mail": {
+            "downloaded": len(underlying_mail.get("downloaded") or []),
+            "failures": underlying_mail.get("failures") or [],
+        },
+        "benchmark": {
+            "successes": len(benchmark.get("successes") or []),
+            "failures": benchmark.get("failures") or [],
+        },
+        "risk": {
+            "successes": len(risk.get("successes") or []),
+            "failures": risk.get("failures") or [],
+        },
+        "market_dashboard": {
+            "modules": len(market.get("modules") or {}),
+            "errors": market.get("errors") or [],
+        },
+        "factor": {
+            "available": factor.get("available"),
+            "valuation_date": factor.get("valuation_date"),
+            "factor_date": factor.get("factor_date"),
+            "products": len(factor.get("products") or []),
+            "errors": factor.get("errors") or [],
+        },
+        "build": {
+            "path": build.get("path"),
+            "summary": build_report.get("summary") or {},
+        },
+        "timing": result.get("timing") or {},
+    }
+    if "underlying_organize" in result:
+        summary["underlying_organize"] = result["underlying_organize"]
+    return json.dumps(summary, ensure_ascii=True, indent=2)
 
 
 def main():
     load_dotenv()
     parser = argparse.ArgumentParser(description="从邮件估值表计算单一投资人的收益与收益率")
-    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "strategy-lab", "portfolio-var", "labels-migrate", "otc-ledger-migrate", "knowledge-add", "knowledge-import", "knowledge-check", "knowledge-reindex", "knowledge-export", "backup", "backup-check", "backup-restore", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
+    parser.add_argument("command", choices=("download", "underlying-mail", "underlying-organize", "factor", "organize", "benchmark", "risk", "market-dashboard", "strategy-lab", "portfolio-var", "labels-migrate", "otc-ledger-migrate", "knowledge-add", "knowledge-import", "knowledge-check", "knowledge-reindex", "knowledge-export", "knowledge-wechat-scan", "knowledge-review-export", "knowledge-review-import", "knowledge-diligence-export", "knowledge-diligence-import", "knowledge-obsidian-export", "backup", "backup-check", "backup-restore", "analyze", "build", "run", "share", "refresh"), nargs="?", default="run")
     parser.add_argument("--products-dir", default="products")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -105,6 +159,7 @@ def main():
     parser.add_argument("--account", action="append", help="只使用指定邮箱账号，可重复传入")
     parser.add_argument("--knowledge-root", default="knowledge_base", help="本地知识库根目录")
     parser.add_argument("--knowledge-file", help="knowledge-add要导入的单个文件")
+    parser.add_argument("--batch", help="知识库助手审阅批次ID")
     parser.add_argument("--backup-root", help="备份仓库；默认读取BACKUP_DIR")
     parser.add_argument("--snapshot", help="备份快照ID；默认使用最新快照")
     parser.add_argument("--target", help="backup-restore恢复到不存在或为空的目录")
@@ -190,6 +245,29 @@ def main():
             result = migrate_otc_ledger(OtcStore(root), args.source)
         print(json.dumps({key: value for key, value in result.items() if key != "products"},
                          ensure_ascii=False, indent=2))
+    elif args.command in ("knowledge-wechat-scan", "knowledge-review-export", "knowledge-review-import",
+                          "knowledge-diligence-export", "knowledge-diligence-import", "knowledge-obsidian-export"):
+        project_root = os.path.abspath(os.path.dirname(args.products_dir))
+        source_store = KnowledgeSourceStore(project_root)
+        diligence_store = KnowledgeDiligenceStore(project_root)
+        with timing.step("知识源、尽调事实与知识图谱", "命令执行"):
+            if args.command == "knowledge-wechat-scan":
+                value = source_store.scan()
+            elif args.command == "knowledge-review-export":
+                value = source_store.export_review(args.batch)
+            elif args.command == "knowledge-review-import":
+                if not args.batch:
+                    parser.error("knowledge-review-import必须提供--batch")
+                value = source_store.import_review(args.batch)
+            elif args.command == "knowledge-diligence-export":
+                value = diligence_store.export_batch(args.batch)
+            elif args.command == "knowledge-diligence-import":
+                if not args.batch:
+                    parser.error("knowledge-diligence-import必须提供--batch")
+                value = diligence_store.import_batch(args.batch)
+            else:
+                value = source_store.export_obsidian()
+        print(json.dumps(value, ensure_ascii=False, indent=2))
     elif args.command.startswith("knowledge-"):
         store = KnowledgeStore(args.knowledge_root)
         with timing.step("本地知识库维护", "命令执行"):
